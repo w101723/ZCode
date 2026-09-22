@@ -576,6 +576,15 @@ export default {
             from: "resources/macos-window-bounds/zcode-window-bounds",
             to: "macos-window-bounds/zcode-window-bounds",
           },
+          ...(existsSync(resolve(desktopPackageRoot, "resources/cua-helper"))
+            ? [
+                {
+                  from: "resources/cua-helper",
+                  to: "cua-helper",
+                  filter: ["**/*"],
+                },
+              ]
+            : []),
         ]
       : []),
     {
@@ -685,6 +694,7 @@ export default {
     signIgnore: [
       "[/\\\\]Contents[/\\\\]Resources[/\\\\]glm([/\\\\]|$)",
       "[/\\\\]Contents[/\\\\]Resources[/\\\\]tools([/\\\\]|$)",
+      "[/\\\\]Contents[/\\\\]Resources[/\\\\]cua-helper([/\\\\]|$)",
     ],
   },
   win: {

@@ -141,13 +141,16 @@ node apps/zcode-cli/packages/cli/dist/zcode.cjs --help
 ### 桌面版
 
 ```bash
-pnpm bundle:desktop
+# 生产后端、正式 ZCode 身份
+ZCODE_ENV=production pnpm bundle:desktop
 
 # 指定目标平台与 CPU 架构
 pnpm bundle:desktop -- --os win --arch x64
 
 pnpm bundle:desktop -- --help
 ```
+
+产物身份由 `ZCODE_ENV` 决定：`production` 产出正式 `ZCode` 安装包；未设置或 `test` 产出连接测试后端的 `ZCode Preview` 包（文件名带 `_TEST` 后缀）。`ZCODE_ENV=production ZCODE_PREVIEW_IDENTITY=1` 可在生产后端上出与正式版并排安装的 Preview 包。
 
 默认目标为 macOS arm64，默认输出目录为 `packages/desktop/dist/`。`--os` 支持 `mac`、`win`、`linux`，`--arch` 支持 `x64`、`arm64`；实际打包与签名需要目标平台对应的工具和配置。
 
@@ -156,6 +159,16 @@ pnpm bundle:desktop -- --help
 ```bash
 sudo xattr -rd com.apple.quarantine /Applications/ZCode.app
 ```
+
+#### 内置官方插件与本地回补（可选）
+
+桌面包内置官方插件由 `prepare:agent-bundle` 暂存到 `packages/desktop/bundled-agents/<平台>/glm/packages/`，开源仓库只提供 browser-use-plugin 与 node-repl-host，其余官方插件源码包未随仓库发布（zcode-guide、image-search、plugin-creator 无任何可提取来源）。如本机已安装官方 ZCode.app，可从安装包回补：
+
+1. 将已安装应用 `Contents/Resources/glm/packages/` 下的插件目录拷入上述暂存目录。其中旧版聚合插件 document-skills 需拆分映射为 `documents-plugin`、`pdf-plugin`、`presentations-plugin`、`spreadsheets-plugin`：各只保留对应 skill（docx/pdf/pptx/xlsx）、`.zcode-plugin/plugin.json` 的 `name` 改为拆分名、补一份 `agents/visual-judge.md`，并移除 `mcpServers`。
+2. computer-use（zcode-cua-plugin）随附的 `docs/computer-use.md`、`scripts/computer-use-client.mjs` 为新定义的完整性要求，旧版运行时不引用，可放占位文件通过校验；其 `ZCode Computer Use.app` Helper 需一并提取，打包完成后放入产物 `Contents/Resources/cua-helper/`（本地打包链不生成该 Helper）。
+3. `prepare:agent-bundle` 每次运行会清空重建暂存目录；回补须在 prepare 之后执行，或以 `pnpm bundle:desktop -- --skip-prepare`（配合 `--skip-build`）复用暂存结果仅重新打包。
+
+回补的插件与 Helper 提取自官方安装包，仅限本机本地使用，请勿随衍生安装包分发；computer-use 的插件/Helper 与宿主 wrapper 存在版本契约差异，回补后能否正常工作以实测为准。
 
 ### ZCode 命令行版
 

@@ -137,7 +137,8 @@ See [third-party/README.md](third-party/README.md) for notice generation, distri
 ### Desktop
 
 ```bash
-pnpm bundle:desktop
+# Production backend with the official ZCode identity
+ZCODE_ENV=production pnpm bundle:desktop
 
 # Set the target platform and CPU architecture
 pnpm bundle:desktop -- --os win --arch x64
@@ -145,7 +146,19 @@ pnpm bundle:desktop -- --os win --arch x64
 pnpm bundle:desktop -- --help
 ```
 
+The artifact identity is controlled by `ZCODE_ENV`: `production` builds the official `ZCode` installer, while an unset or `test` value builds a `ZCode Preview` package against the test backend (with a `_TEST` filename suffix). `ZCODE_ENV=production ZCODE_PREVIEW_IDENTITY=1` builds a Preview package against the production backend that can be installed side by side with the official build.
+
 The default target is macOS arm64, and the default output directory is `packages/desktop/dist/`. `--os` accepts `mac`, `win`, or `linux`; `--arch` accepts `x64` or `arm64`. Packaging and signing require the tools and configuration for the target platform.
+
+#### Built-in official plugins and local backfill (optional)
+
+Official plugins bundled with the desktop app are staged by `prepare:agent-bundle` into `packages/desktop/bundled-agents/<platform>/glm/packages/`. The open-source repository only ships browser-use-plugin and node-repl-host; the source packages of the remaining official plugins are not published with the repository (zcode-guide, image-search, and plugin-creator have no extractable source at all). If the official ZCode.app is installed locally, you can backfill from it:
+
+1. Copy the plugin directories from the installed app's `Contents/Resources/glm/packages/` into the staging directory above. The legacy aggregate plugin document-skills must be split into `documents-plugin`, `pdf-plugin`, `presentations-plugin`, and `spreadsheets-plugin`: keep only the matching skill in each (docx/pdf/pptx/xlsx), rename `name` in `.zcode-plugin/plugin.json` to the split name, add an `agents/visual-judge.md`, and remove `mcpServers`.
+2. For computer-use (zcode-cua-plugin), `docs/computer-use.md` and `scripts/computer-use-client.mjs` are required by the newer definition for completeness; the legacy runtime does not reference them, so placeholder files are enough to pass the check. Its `ZCode Computer Use.app` helper must be extracted as well and placed into the built app's `Contents/Resources/cua-helper/` after packaging (the local packaging chain does not produce this helper).
+3. `prepare:agent-bundle` wipes and rebuilds the staging directory on every run; backfill must happen after prepare, or reuse the staged result with `pnpm bundle:desktop -- --skip-prepare` (plus `--skip-build`) to only repackage.
+
+The backfilled plugins and helper are extracted from the official installer and are for local use only; do not distribute derived installers. The computer-use plugin/helper and the host wrapper have a version contract gap, so whether the backfilled computer-use works must be verified by testing.
 
 ### ZCode CLI distribution
 

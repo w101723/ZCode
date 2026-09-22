@@ -111,6 +111,67 @@ const officialPluginPackages = [
     runtimeBuildScript: "scripts/build.mjs",
     stagedPath: "packages/node-repl-host",
   },
+
+  {
+    packageName: "@zcode/android-emulator-plugin",
+    relativePath: "apps/zcode-cli/packages/android-emulator-plugin",
+    stagedPath: "packages/android-emulator-plugin",
+  },
+  {
+    packageName: "@zcode/documents-plugin",
+    relativePath: "apps/zcode-cli/packages/documents-plugin",
+    stagedPath: "packages/documents-plugin",
+  },
+  {
+    packageName: "@zcode/image-search-plugin",
+    relativePath: "apps/zcode-cli/packages/image-search-plugin",
+    stagedPath: "packages/image-search-plugin",
+  },
+  {
+    packageName: "@zcode/ios-simulator-plugin",
+    relativePath: "apps/zcode-cli/packages/ios-simulator-plugin",
+    stagedPath: "packages/ios-simulator-plugin",
+  },
+  {
+    packageName: "@zcode/pdf-plugin",
+    relativePath: "apps/zcode-cli/packages/pdf-plugin",
+    stagedPath: "packages/pdf-plugin",
+  },
+  {
+    packageName: "@zcode/plugin-creator-plugin",
+    relativePath: "apps/zcode-cli/packages/plugin-creator-plugin",
+    stagedPath: "packages/plugin-creator-plugin",
+  },
+  {
+    packageName: "@zcode/presentations-plugin",
+    relativePath: "apps/zcode-cli/packages/presentations-plugin",
+    stagedPath: "packages/presentations-plugin",
+  },
+  {
+    packageName: "@zcode/restore-legacy-sessions-plugin",
+    relativePath: "apps/zcode-cli/packages/restore-legacy-sessions-plugin",
+    stagedPath: "packages/restore-legacy-sessions-plugin",
+  },
+  {
+    packageName: "@zcode/skill-creator-plugin",
+    relativePath: "apps/zcode-cli/packages/skill-creator-plugin",
+    stagedPath: "packages/skill-creator-plugin",
+  },
+  {
+    packageName: "@zcode/spreadsheets-plugin",
+    relativePath: "apps/zcode-cli/packages/spreadsheets-plugin",
+    stagedPath: "packages/spreadsheets-plugin",
+  },
+  {
+    packageName: "@zcode/zcode-cua-plugin",
+    relativePath: "apps/zcode-cli/packages/zcode-cua-plugin",
+    stagedPath: "packages/zcode-cua-plugin",
+  },
+  {
+    packageName: "@zcode/zcode-guide-plugin",
+    relativePath: "apps/zcode-cli/packages/zcode-guide-plugin",
+    stagedPath: "packages/zcode-guide-plugin",
+  },
 ];
 const includedOfficialPluginTopLevelPaths = new Set([
   ".mcp.json",
@@ -122,18 +183,14 @@ const includedOfficialPluginTopLevelPaths = new Set([
   "dist",
   "docs",
   "hooks",
+  "node_modules",
   "output-styles",
   "package.json",
   "scripts",
   "skills",
   "templates",
 ]);
-const excludedOfficialPluginAssetNames = new Set([
-  ".DS_Store",
-  ".venv",
-  "__pycache__",
-  "node_modules",
-]);
+const excludedOfficialPluginAssetNames = new Set([".DS_Store", ".venv", "__pycache__"]);
 
 function shouldCopyOfficialPluginAsset(sourcePath) {
   const name = basename(sourcePath);
