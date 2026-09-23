@@ -1,4 +1,6 @@
 dist/
+!packages/node-repl-host/dist/
+!packages/node-repl-host/dist/**
 node_modules/
 .DS_Store
 *.log

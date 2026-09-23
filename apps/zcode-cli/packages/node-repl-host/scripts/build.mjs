@@ -1,3 +1,4 @@
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -42,6 +43,16 @@ export const buildNodeReplHostBundle = async ({
   outfile = resolve(packageRoot, "dist", "mcp", "server.js"),
   cuaHelperBuildId = resolveCuaHelperBuildId(),
 } = {}) => {
+  if (existsSync(outfile) && process.env.ZCODE_FORCE_REBUILD_NODE_REPL_HOST !== "1") {
+    const stat = statSync(outfile);
+    if (stat.size > 3 * 1024 * 1024) {
+      console.log(
+        `[node-repl-host] keeping existing official runtime: ${outfile} (${(stat.size / 1024 / 1024).toFixed(2)} MB)`,
+      );
+      return { outfile, cuaHelperBuildId };
+    }
+  }
+
   await mkdir(dirname(outfile), { recursive: true });
   await build({
     banner: { js: nodeRequireBanner },
