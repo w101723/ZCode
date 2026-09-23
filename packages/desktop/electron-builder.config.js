@@ -537,6 +537,18 @@ export default {
     await stageElectronNotices(context.appOutDir, resources, framework.version);
   },
   afterPack: async (context) => {
+    if (context.electronPlatformName === "win32") {
+      const sourceNodeModules = resolve(desktopPackageRoot, "resources/windows-cua-helper/node_modules");
+      const resourcesDir = resolvePackagedResourcesDir(context);
+      const targetDir = resolve(resourcesDir, "tools/cua-helper");
+      if (existsSync(sourceNodeModules) && existsSync(targetDir)) {
+        const targetNodeModules = resolve(targetDir, "node_modules");
+        if (!existsSync(targetNodeModules)) {
+          console.log("[afterPack] copying windows-cua-helper node_modules into packaged resources/tools/cua-helper");
+          cpSync(sourceNodeModules, targetNodeModules, { recursive: true });
+        }
+      }
+    }
     const actualWindowsTarget =
       context.electronPlatformName === "win32"
         ? resolveElectronBuilderWindowsTarget({
