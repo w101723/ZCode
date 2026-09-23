@@ -1,5 +1,9 @@
 export declare const BROKER_SOCKET_ENV: string;
 export declare const BROKER_UNAVAILABLE_ENV: string;
+export declare const WINDOWS_PIPE_PREFIX: string;
+
+export declare function isWindowsNamedPipePath(path: string): boolean;
+export declare function brokerRuntimeDir(env?: Record<string, string | undefined>): string;
 
 export declare class BrokerError extends Error {
   code: string;
