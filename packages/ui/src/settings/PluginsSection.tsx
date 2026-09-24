@@ -497,7 +497,7 @@ function PluginList({
               onClick={() => actions.onOpenDetail(plugin.id)}
             >
               <PluginStoreAvatar
-                item={storeItemById.get(plugin.id) ?? { name: plugin.name }}
+                item={storeItemById.get(plugin.id) ?? { id: plugin.id, name: plugin.name }}
                 className="size-9 bg-background"
               />
               <div className="min-w-0 flex-1">

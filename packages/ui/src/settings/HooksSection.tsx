@@ -233,6 +233,7 @@ export function HooksSection({ workspacePath, workspaceIdentity }: HooksSectionP
       filterPluginHooksByScope(pluginHooks, activeScope).map((hook) => ({
         ...hook,
         pluginIconItem: {
+          id: hook.pluginId,
           name: hook.pluginName,
           listing: pluginListingById.get(hook.pluginId),
         },

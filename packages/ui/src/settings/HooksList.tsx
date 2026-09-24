@@ -19,7 +19,7 @@ export interface PluginHookRow {
   pluginId: string;
   pluginName: string;
   pluginScope?: PluginScope;
-  pluginIconItem?: Pick<StorePluginItem, "name" | "listing">;
+  pluginIconItem?: Pick<StorePluginItem, "name" | "listing"> & Partial<Pick<StorePluginItem, "id">>;
 }
 
 type HookSection =
@@ -188,7 +188,7 @@ function HookItemFrame({
   actions?: ReactNode;
   children: ReactNode;
   onEdit?: () => void;
-  pluginIconItem?: Pick<StorePluginItem, "name" | "listing">;
+  pluginIconItem?: Pick<StorePluginItem, "name" | "listing"> & Partial<Pick<StorePluginItem, "id">>;
   testId?: string;
 }) {
   return (

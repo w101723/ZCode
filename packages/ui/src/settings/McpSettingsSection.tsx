@@ -486,6 +486,7 @@ function PluginMcpServerList({
             <div className="relative size-9 shrink-0" data-mcp-status-dot-placement="icon-corner">
               <PluginStoreAvatar
                 item={{
+                  id: item.pluginId,
                   name: item.pluginName,
                   listing: pluginListingById.get(item.pluginId),
                 }}

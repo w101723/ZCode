@@ -456,7 +456,7 @@ function AgentListRow({
   onToggle,
 }: {
   agent: AgentSummary;
-  pluginIconItem?: Pick<StorePluginItem, "name" | "listing">;
+  pluginIconItem?: Pick<StorePluginItem, "name" | "listing"> & Partial<Pick<StorePluginItem, "id">>;
   isOperating: boolean;
   modelGroups: readonly ModelSelectGroup[];
   modelSelectionView?: ModelSelectionView | null;
@@ -1613,7 +1613,7 @@ export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
       new Map(
         plugins.map((plugin) => [
           plugin.id,
-          { name: plugin.name, listing: pluginListingById.get(plugin.id) },
+          { id: plugin.id, name: plugin.name, listing: pluginListingById.get(plugin.id) },
         ]),
       ),
     [pluginListingById, plugins],
@@ -1690,6 +1690,7 @@ export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
                 ? pluginIconItemById.get(agent.pluginId)
                 : agent.pluginName
                   ? {
+                      id: agent.pluginId ?? agent.pluginName,
                       name: agent.pluginName,
                       listing: resolveUniquePluginListingByName(availablePlugins, agent.pluginName),
                     }

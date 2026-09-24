@@ -498,7 +498,7 @@ export function SkillsSection({
       new Map(
         plugins.map((plugin) => [
           plugin.id,
-          { name: plugin.name, listing: pluginListingById.get(plugin.id) },
+          { id: plugin.id, name: plugin.name, listing: pluginListingById.get(plugin.id) },
         ]),
       ),
     [pluginListingById, plugins],
@@ -576,6 +576,7 @@ export function SkillsSection({
       ? pluginIconItemById.get(skill.pluginId)
       : skill.pluginName
         ? {
+            id: skill.pluginId ?? skill.pluginName,
             name: skill.pluginName,
             listing: resolveUniquePluginListingByName(availablePlugins, skill.pluginName),
           }

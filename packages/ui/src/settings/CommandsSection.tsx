@@ -354,6 +354,7 @@ export function CommandsSection({
           pluginIconItem={
             isPluginCommand(command)
               ? {
+                  id: `${command.pluginName.trim()}@${command.pluginMarketplace.trim()}`,
                   name: command.pluginName,
                   listing: pluginListingById.get(
                     `${command.pluginName.trim()}@${command.pluginMarketplace.trim()}`,
