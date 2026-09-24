@@ -453,14 +453,9 @@ function resolveDynamicWorkflowModeHostEnv(options: {
   isPackaged: boolean;
   isPreview: boolean;
 }): Record<string, string> {
-  if (!options.isPackaged) {
-    const mode = normalizeDynamicWorkflowMode(options.inheritedValue);
-    return mode ? { [ZCODE_DYNAMIC_WORKFLOW_MODE_ENV]: mode } : {};
-  }
-  if (options.isPreview) {
-    return { [ZCODE_DYNAMIC_WORKFLOW_MODE_ENV]: "alwaysOn" };
-  }
-  return {};
+  // 开源版默认激活动态工作流：允许开发者或用户通过环境变量显式覆盖（如 disabled），未指定时默认 alwaysOn。
+  const mode = normalizeDynamicWorkflowMode(options.inheritedValue) ?? "alwaysOn";
+  return { [ZCODE_DYNAMIC_WORKFLOW_MODE_ENV]: mode };
 }
 
 export function buildHostProcessEnv(hostProcessLocalEnv: Record<string, string>) {

@@ -3335,8 +3335,9 @@ async function createRecord(
       // undefined：core 把「缺席」定义为「不参与灰度、保留全部工具」（TUI / headless /
       // workflow_child 的语义），受信 Host 创建的会话不能落进那条豁免。
       dynamicWorkflowEnabled:
-        ("dynamicWorkflowEnabled" in params && params.dynamicWorkflowEnabled === true) ||
-        context.appRuntimePreferences.dynamicWorkflowEnabled === true,
+        "dynamicWorkflowEnabled" in params && params.dynamicWorkflowEnabled !== undefined
+          ? params.dynamicWorkflowEnabled === true
+          : context.appRuntimePreferences.dynamicWorkflowEnabled === true,
       // 协议侧的工具允许/拒绝列表是 session 级安全边界，必须进入 runtimeConfig，
       // 不能只依赖 prompt 文本约束，否则内置工具和动态 MCP 工具仍可能越过调用面。
       toolAllowlist: "toolAllowlist" in params ? params.toolAllowlist : undefined,

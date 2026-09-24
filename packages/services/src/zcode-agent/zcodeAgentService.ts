@@ -104,6 +104,10 @@ import {
   type ZCodeAutomationRun,
   zcodeWorkspaceUpdateOffPeakToolPolicyResultSchema,
   zcodeWorkspaceUpdateDynamicWorkflowPolicyResultSchema,
+  DEFAULT_DYNAMIC_WORKFLOW_MODE,
+  isDynamicWorkflowModeEnabled,
+  normalizeDynamicWorkflowMode,
+  ZCODE_DYNAMIC_WORKFLOW_MODE_ENV,
   type DynamicWorkflowClientConfig,
   type AgentLaneResourceSample,
   type ProcessResourceCliLane,
@@ -3253,15 +3257,19 @@ export function createZCodeAgentService(
    */
   function resolveDynamicWorkflowGate(): Promise<boolean> {
     const resolve = options?.resolveDynamicWorkflowClientConfig;
-    if (!resolve) return Promise.resolve(false);
+    if (!resolve) {
+      const envMode = normalizeDynamicWorkflowMode(process.env[ZCODE_DYNAMIC_WORKFLOW_MODE_ENV]);
+      return Promise.resolve(isDynamicWorkflowModeEnabled(envMode ?? DEFAULT_DYNAMIC_WORKFLOW_MODE));
+    }
     dynamicWorkflowGate ??= (async () => {
       try {
         return (await resolve())?.enabled === true;
       } catch (error) {
-        logger.warn(undefined, "动态工作流灰度读取失败，按关闭处理", {
+        logger.warn(undefined, "动态工作流灰度读取失败，回退到默认模式", {
           errorMessage: error instanceof Error ? error.message : String(error),
         });
-        return false;
+        const envMode = normalizeDynamicWorkflowMode(process.env[ZCODE_DYNAMIC_WORKFLOW_MODE_ENV]);
+        return isDynamicWorkflowModeEnabled(envMode ?? DEFAULT_DYNAMIC_WORKFLOW_MODE);
       }
     })();
     return dynamicWorkflowGate;

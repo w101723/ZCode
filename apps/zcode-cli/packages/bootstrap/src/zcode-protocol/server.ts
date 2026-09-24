@@ -1,5 +1,9 @@
 import { querySessionDebug } from "./session-debug.js";
 import {
+  DEFAULT_DYNAMIC_WORKFLOW_MODE,
+  isDynamicWorkflowModeEnabled,
+  normalizeDynamicWorkflowMode,
+  ZCODE_DYNAMIC_WORKFLOW_MODE_ENV,
   zcodePluginsCancelOperationParamsSchema,
   zcodeProtocolMethods,
   zcodeWorkspaceCancelGenerateTextParamsSchema,
@@ -250,9 +254,12 @@ export class ZCodeProtocolAgentServer {
         askUserQuestionAutoResolutionEnabled: true,
         modelIoFullRetentionEnabled: false,
         offPeakToolEnabled: false,
-        // 动态工作流灰度门 fail-closed：Host 必须显式 workspace/updateDynamicWorkflowPolicy
-        // 才开启。
-        dynamicWorkflowEnabled: false,
+        // 动态工作流默认激活：开源版默认 alwaysOn，允许环境变量显式覆盖或 Host 动态调整策略。
+        dynamicWorkflowEnabled: isDynamicWorkflowModeEnabled(
+          normalizeDynamicWorkflowMode(
+            deps.env?.[ZCODE_DYNAMIC_WORKFLOW_MODE_ENV] ?? process.env[ZCODE_DYNAMIC_WORKFLOW_MODE_ENV],
+          ) ?? DEFAULT_DYNAMIC_WORKFLOW_MODE,
+        ),
       },
       notify: (notification) => this.messageSink?.(notification),
       requestClient: (method, params, resultSchema, options) =>

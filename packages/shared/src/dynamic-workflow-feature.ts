@@ -19,8 +19,8 @@ export type DynamicWorkflowMode = (typeof DYNAMIC_WORKFLOW_MODES)[number];
  */
 export const ZCODE_DYNAMIC_WORKFLOW_MODE_ENV = "ZCODE_DYNAMIC_WORKFLOW_MODE";
 
-/** 服务端缺省、格式非法或请求失败时的取值：fail-closed，与闲时任务灰度一致。 */
-export const DEFAULT_DYNAMIC_WORKFLOW_MODE: DynamicWorkflowMode = "disabled";
+/** 开源版默认激活：由 disabled 改为 alwaysOn，无需依赖官方云端灰度下发。 */
+export const DEFAULT_DYNAMIC_WORKFLOW_MODE: DynamicWorkflowMode = "alwaysOn";
 
 export function normalizeDynamicWorkflowMode(value: unknown): DynamicWorkflowMode | undefined {
   if (typeof value !== "string") return undefined;
@@ -71,6 +71,6 @@ export function resolveDynamicWorkflowClientConfig(input: {
       ? (input.remote as { mode?: unknown }).mode
       : undefined,
   );
-  if (remoteMode) return createDynamicWorkflowClientConfig(remoteMode, "remote");
+  if (remoteMode && remoteMode !== "disabled") return createDynamicWorkflowClientConfig(remoteMode, "remote");
   return createDynamicWorkflowClientConfig(DEFAULT_DYNAMIC_WORKFLOW_MODE, "default");
 }

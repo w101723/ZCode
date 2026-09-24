@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { createConfig } from "@zcode/adapters/config";
 import { createNodeSkillAdapter } from "@zcode/adapters/skills";
 import type { Logger, SkillContent, SkillDiagnostic, SkillLoadOutcome } from "@zcode/contracts";
+import { resolveBundledSkillRoots } from "./app/bundled-skills.js";
 import { resolveZCodePlugins } from "./plugins.js";
 import { collectDisabledPaths } from "./skill-command-overrides.js";
 
@@ -105,11 +106,15 @@ function createSkillDiscovery(options: ListZCodeSkillsOptions):
     workingDirectory,
   });
 
+  const bundledSkillRoots = resolveBundledSkillRoots({
+    logger: options.logger,
+  });
+
   return {
     enabled: true,
     skillPort: createNodeSkillAdapter({
       extraRoots: configResult.config.skills.roots,
-      extraResolvedRoots: pluginOutcome.skillRoots,
+      extraResolvedRoots: [...pluginOutcome.skillRoots, ...bundledSkillRoots],
       disabledPaths: collectDisabledPaths(configResult.config.skillOverrides),
     }),
     workingDirectory,

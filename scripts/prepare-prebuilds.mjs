@@ -485,6 +485,21 @@ function stageRemoteOfficialPlugins(glmDir) {
   }
 }
 
+function stageRemoteBundledSkills(glmDir) {
+  const sourceRoot = join(rootDir, "apps/zcode-cli/packages/bundled-skills");
+  if (!existsSync(sourceRoot)) {
+    console.log("  [skip] bundled-skills source directory not found");
+    return;
+  }
+  const targetRoot = join(glmDir, "packages/bundled-skills");
+  mkdirSync(targetRoot, { recursive: true });
+  cpSync(sourceRoot, targetRoot, {
+    recursive: true,
+    filter: shouldCopyOfficialPluginAsset,
+  });
+  console.log("  [ok] mock-cdn glm bundled-skills");
+}
+
 // 远端 agent 现在跑编译出来的 zcode.cjs（而不是各平台独立的原生二进制）：
 // 远端部署时已经有一份独立 node（跑 zcode-server.cjs），agent 复用它执行 zcode.cjs 即可，
 // 不必再为每个平台准备一份内嵌 node 的 SEA 二进制。zcode.cjs 跨平台同一份，逐平台只是放进各自的
@@ -512,6 +527,7 @@ function stageRemoteAgentBundles() {
     mkdirSync(glmDir, { recursive: true });
     copyFileSync(cliBundlePath, join(glmDir, "zcode.cjs"));
     stageRemoteOfficialPlugins(glmDir);
+    stageRemoteBundledSkills(glmDir);
     console.log(`  [ok] mock-cdn glm/${platformKey}/zcode.cjs`);
   }
 }

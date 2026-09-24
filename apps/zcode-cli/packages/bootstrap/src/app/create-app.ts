@@ -73,6 +73,7 @@ import {
   collectDynamicWorkflowDisabledSkillPaths,
   DYNAMIC_WORKFLOW_GATED_COMMAND_NAMES,
 } from "./dynamic-workflow-gate.js";
+import { resolveBundledSkillRoots } from "./bundled-skills.js";
 import { createWorkspaceHookRuntimeSecurity } from "./workspace-hook-trust.js";
 import { createScriptWorkflowBridge } from "./script-workflow-methods.js";
 import {
@@ -723,6 +724,10 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       registry: options.providerRegistry,
       currentSelection: () => getRuntime().getSessionModelSelection(),
     });
+    const bundledSkillRoots = resolveBundledSkillRoots({
+      cliStorageRoot,
+      logger,
+    });
     runtime = new AgentRuntime(sessionId, runtimeConfig, {
       agentTelemetry: modelTelemetry.agentExecution,
       // 主代理的模型请求过治理器的 observer：立即放行，但让治理器看见它的 429 / 成功。
@@ -747,13 +752,13 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           ? (options.skillPort ??
             createNodeSkillAdapter({
               extraRoots: configResult.config.skills.roots,
-              extraResolvedRoots: pluginOutcome.skillRoots,
+              extraResolvedRoots: [...pluginOutcome.skillRoots, ...bundledSkillRoots],
               disabledPaths: [
                 ...collectDisabledPaths(configResult.config.skillOverrides),
                 // 动态工作流灰度关闭时不提供 dynamic-workflows 技能：
                 // 十个工具都不在场，再让模型读到「怎么写工作流脚本」只会诱导它去调不存在的工具。
                 ...(runtimeConfig.dynamicWorkflowEnabled === false
-                  ? collectDynamicWorkflowDisabledSkillPaths(pluginOutcome.skillRoots)
+                  ? collectDynamicWorkflowDisabledSkillPaths(bundledSkillRoots)
                   : []),
               ],
             }))

@@ -73,6 +73,8 @@ export { prepareZCodeTelemetryEnv, shutdownZCodeTelemetry } from "./telemetry-bo
 export type { SessionTranscriptMessage, SessionTranscriptPart } from "./session-transcript.js";
 export { listZCodeSessions, resolveLatestSession } from "./sessions.js";
 export { inspectZCodeSkill, listZCodeSkills } from "./skills.js";
+export { resolveBundledSkillRoots } from "./app/bundled-skills.js";
+export type { ResolveBundledSkillRootsOptions } from "./app/bundled-skills.js";
 export type {
   InspectZCodeSkillOptions,
   ListZCodeSkillsOptions,

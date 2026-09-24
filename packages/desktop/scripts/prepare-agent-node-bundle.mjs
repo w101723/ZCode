@@ -307,6 +307,21 @@ function stageOfficialPlugins() {
   }
 }
 
+function stageBundledSkills() {
+  const sourceRoot = resolve(repoRoot, "apps/zcode-cli/packages/bundled-skills");
+  if (!existsSync(sourceRoot)) {
+    console.log("[prepare:agent-bundle] bundled-skills not found, skipping");
+    return;
+  }
+  const targetRoot = resolve(glmDir, "packages/bundled-skills");
+  mkdirSync(targetRoot, { recursive: true });
+  cpSync(sourceRoot, targetRoot, {
+    recursive: true,
+    filter: shouldCopyOfficialPluginAsset,
+  });
+  console.log(`[prepare:agent-bundle] staged bundled-skills to ${targetRoot}`);
+}
+
 // Electron 生产包只带 resources/glm/zcode.cjs 时，app-server 进程的
 // __dirname 附近没有官方插件目录，启动时 seed 找不到 source，用户侧不会自动得到内置插件。
 // 这里把官方插件按 bootstrap 的 rootCandidates 期望放到 glm/packages/*-plugin，
@@ -317,3 +332,4 @@ buildCliBundle();
 buildOfficialPluginRuntimes();
 stageBundle();
 stageOfficialPlugins();
+stageBundledSkills();

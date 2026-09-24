@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import process from "node:process";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveNativeSearchReleasePlan } from "../../../scripts/native-search-tools-config.mjs";
@@ -61,4 +63,35 @@ if (!shouldSkipRemoteAssets) {
 
 for (const scriptName of localRuntimeScripts) {
   runTimedPnpmScript(scriptName);
+}
+
+function syncWindowsCuaHelperManifest() {
+  const helperDir = resolve(desktopRoot, "resources", "windows-cua-helper");
+  const manifestPath = resolve(helperDir, "runtime-manifest.json");
+  if (!existsSync(manifestPath)) return;
+
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const entryPath = resolve(helperDir, manifest.entry);
+    const addonPath = resolve(helperDir, manifest.addon);
+    if (!existsSync(entryPath) || !existsSync(addonPath)) return;
+
+    const entryHash = createHash("sha256").update(readFileSync(entryPath)).digest("hex");
+    const addonHash = createHash("sha256").update(readFileSync(addonPath)).digest("hex");
+
+    if (manifest.sha256?.entry !== entryHash || manifest.sha256?.addon !== addonHash) {
+      console.log("[prepare:runtime-assets] syncing windows-cua-helper runtime-manifest.json sha256 checksums");
+      manifest.sha256 = {
+        entry: entryHash,
+        addon: addonHash,
+      };
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+    }
+  } catch (error) {
+    console.warn("[prepare:runtime-assets] failed to sync windows-cua-helper manifest:", error);
+  }
+}
+
+if (target.os === "win32") {
+  syncWindowsCuaHelperManifest();
 }

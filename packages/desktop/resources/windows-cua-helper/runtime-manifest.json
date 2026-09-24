@@ -8,7 +8,7 @@
   "entry": "dist/windows-helper.js",
   "addon": "build/Release/ax_native.node",
   "sha256": {
-    "entry": "88b7e601df94cae155f34fd771f9aaeda41dfb0bbadcc33daf89d434a364196e",
+    "entry": "a38195a24eaa3fdfb88f8e3e6e6e10fbd1f5c37921800d3876d6e111f9229640",
     "addon": "e2518aa12977b1faa0b0d953e34d3b0c8695db5db0e40a1c6e99128acdabab53"
   }
 }
