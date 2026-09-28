@@ -360,6 +360,12 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
         rememberArtifactRow(this.state, node.artifactId, node.result);
       }
       this.spentTokens = existing.spentTokens;
+      // 并发上界以 journal 行为准（caps_max_concurrency，not null）：一次就地 retune 已把新值
+      // 写进行里。调用方纪律（dynamic-workflow-run-submit 的 resume 路）传的就是行里那份，这里
+      // 再从行恢复一次，把「resume 沿用行里的 caps，不落库就恢复成旧上界」的承诺关进引擎自身
+      // ——未来某个调用方漏传行值、只给了启动时的旧上界，也不会让 retune 的结果悄悄回退。
+      // 行值恒为正整数（建行与 updateRunCaps 同一归一），无需再钳。
+      this.caps = existing.caps;
       // 修订 run 的崩溃恢复：导入表被整表重建，而「门是否已关」不落库——从事件精确恢复。
       if (this.importedCache !== undefined) {
         const recovered = recoverImportClosure(this.journal, this.runId);

@@ -1129,6 +1129,11 @@ export function createConversationV4Gateway(
         // 动态工作流灰度门同为 runtime 创建期配置：
         // v4 createSession 必须与 legacy session/create 等价透传，否则无界面创建的会话
         // 会绕过 Host 的灰度判定，只剩进程级缺省。
+        // 语义决策（合并 v3.14.3 时随上游收窄，勿当 bug 修）：只有显式 true 才透传。客户端
+        // 发 false 或缺席都落回进程级缺省（本仓默认 alwaysOn）——「按会话显式关闭」的路已不存在。
+        // 当前无调用方发送 false（UI 侧只在门禁为 true 时写 true，见 zcodeAgentService 的
+        // buildConversationCommandEnvelope）；未来若需要按会话关闭，先恢复 false 透传并同步
+        // server-operations createRecord 的三态判定，再谈调用方。
         ...(dynamicWorkflowEnabled === true ? { dynamicWorkflowEnabled: true } : {}),
       });
       return { sessionId: created.sessionId };
