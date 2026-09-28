@@ -82,9 +82,12 @@ function resolveCommitId() {
 export function collectBuildMetadata() {
   const rootPackageJson = readJson(resolve(workspaceDir, "package.json"));
   const desktopPackageJson = readJson(resolve(desktopDir, "package.json"));
+  const rawVersion =
+    typeof rootPackageJson.version === "string" ? rootPackageJson.version.trim() : "unknown";
 
   return {
-    appVersion: normalizeVersion(rootPackageJson.version),
+    appVersion: rawVersion,
+    packageVersion: normalizeVersion(rawVersion),
     buildCommitId: resolveCommitId(),
     buildTime: new Date().toISOString(),
     electronBuilderVersion: resolveInstalledPackageVersion(

@@ -233,7 +233,7 @@ const PACKAGING_PRUNE_PATTERNS = [
 
 function buildDesktopArtifactName(platformName, extension = "${ext}") {
   // 测试环境产物必须和正式安装包文件名区分，避免上传、下载或人工验收时混用。
-  return `\${productName}-\${version}-${platformName}-\${arch}${desktopArtifactEnvSuffix}.${extension}`;
+  return `\${productName}-${buildMetadata.appVersion}-${platformName}-\${arch}${desktopArtifactEnvSuffix}.${extension}`;
 }
 
 function runAsarCommand(args) {
@@ -452,7 +452,7 @@ export default {
   // Linux deb 打包（fpm）会校验 package metadata 中的 homepage、author.email、maintainer。
   // CI 环境下若这些字段缺失会在产物阶段直接失败。这里统一在构建配置补齐，避免依赖外部注入。
   extraMetadata: {
-    version: buildMetadata.appVersion,
+    version: buildMetadata.packageVersion ?? buildMetadata.appVersion,
     zcodeProductFlavor: desktopProductIdentity.flavor,
     homepage: "https://zcode.z.ai",
     author: {
@@ -538,13 +538,18 @@ export default {
   },
   afterPack: async (context) => {
     if (context.electronPlatformName === "win32") {
-      const sourceNodeModules = resolve(desktopPackageRoot, "resources/windows-cua-helper/node_modules");
+      const sourceNodeModules = resolve(
+        desktopPackageRoot,
+        "resources/windows-cua-helper/node_modules",
+      );
       const resourcesDir = resolvePackagedResourcesDir(context);
       const targetDir = resolve(resourcesDir, "tools/cua-helper");
       if (existsSync(sourceNodeModules) && existsSync(targetDir)) {
         const targetNodeModules = resolve(targetDir, "node_modules");
         if (!existsSync(targetNodeModules)) {
-          console.log("[afterPack] copying windows-cua-helper node_modules into packaged resources/tools/cua-helper");
+          console.log(
+            "[afterPack] copying windows-cua-helper node_modules into packaged resources/tools/cua-helper",
+          );
           cpSync(sourceNodeModules, targetNodeModules, { recursive: true });
         }
       }
