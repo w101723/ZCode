@@ -220,8 +220,12 @@ export async function showAboutDialog(
   locale: Locale = DEFAULT_LOCALE,
 ): Promise<MessageBoxReturnValue> {
   const { app, BrowserWindow } = await import("electron");
+  // 打包态 electron-builder 为满足 semver 用 extraMetadata.version（packageVersion，如 "3.14.3"）
+  // 覆盖 asar 内 package.json，app.getVersion() 返回的是打包版本而非展示版本。
+  // About 的版本取值走 createAboutSnapshot 自身的归一链（buildMetadata.appVersion ?? ZCODE_VERSION，
+  // 均为 dev-3.14.3），与导出日志的 build-meta 取数口径一致；显式传 app.getVersion() 会把
+  // buildMetadata.appVersion 压在 ?? 链后面，导致 About 显示 3.14.3。
   const snapshot = createAboutSnapshot({
-    appVersion: app.getVersion(),
     buildMetadata: readBuildMetadata(),
   });
   const aboutMessages = getAboutMessages(locale);
