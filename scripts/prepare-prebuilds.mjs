@@ -40,7 +40,13 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, "..");
 const desktopDir = join(rootDir, "packages/desktop");
 const mockCdnDir = join(desktopDir, "mock-cdn");
-const version = require(join(rootDir, "package.json")).version;
+// mock-cdn 的 releases/<version> 目录名必须与运行时 CDN 路径的 version 同源：
+// desktopRuntimeEnv/remoteAssetLiveIdentity 用编译期 ZCODE_VERSION（build-metadata 的
+// appVersion，动态含 git 短 hash）拼 releases/<version>，这里曾直接取 package.json
+// 的静态 version，动态版本上线后两者会失配（开发态 mock-cdn 永远 miss）。
+// 复用 build-metadata.mjs 的 collectBuildMetadata 保证同一份拼接规则。
+const { collectBuildMetadata } = await import(join(desktopDir, "scripts", "build-metadata.mjs"));
+const version = collectBuildMetadata().appVersion;
 const ZCODE_AGENT_RUNTIME = {
   glm: {
     version: readZCodeAgentRuntimeVersion(),

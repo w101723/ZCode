@@ -57,6 +57,26 @@ function normalizeVersion(version) {
   return normalized || version;
 }
 
+/**
+ * 展示版本动态拼接 git 短 hash：`dev-3.14.3` → `dev-3.14.3-<8位hash>`。
+ *
+ * 之前 appVersion 静态钉在 package.json 的 `dev-3.14.3`，同一基线先后打的包
+ * 无法从 About/文件名区分（只能翻 build-meta 的 commitId）。electron-builder 的
+ * 硬约束只落在 packageVersion（extraMetadata.version，semver 校验；Windows 版本
+ * 资源按 major.minor.patch 数字解析），appVersion 只进展示串与产物文件名，追加
+ * `-<hash>` 后缀是安全的；所有版本比较处（autoUpdater 的 semver.coerce、远端部署
+ * 的整串不等判断）对动态后缀的行为都符合预期。
+ *
+ * hash 与 buildCommitId 同源同精度（git rev-parse --short=8）；非 git 环境
+ * （源码 zip、CI 浅导出）回退纯 base，保证可构建性。
+ */
+function buildDynamicAppVersion(baseVersion, commitId) {
+  const base = typeof baseVersion === "string" ? baseVersion.trim() : "";
+  if (!base) return "unknown";
+  if (!commitId || commitId === "unknown") return base;
+  return `${base}-${commitId}`;
+}
+
 function resolveInstalledPackageVersion(packageName, fallbackVersion) {
   try {
     const packageJsonPath = require.resolve(`${packageName}/package.json`, { paths: [desktopDir] });
@@ -84,11 +104,15 @@ export function collectBuildMetadata() {
   const desktopPackageJson = readJson(resolve(desktopDir, "package.json"));
   const rawVersion =
     typeof rootPackageJson.version === "string" ? rootPackageJson.version.trim() : "unknown";
+  const buildCommitId = resolveCommitId();
 
   return {
-    appVersion: rawVersion,
+    // 展示版本 = package.json 基线 + git 短 hash（如 dev-3.14.3-07fc6b58），
+    // 让 About/文件名可直接区分同一基线下的不同构建。
+    appVersion: buildDynamicAppVersion(rawVersion, buildCommitId),
+    // 打包元数据版本：去掉前缀取数字（semver），供 electron-builder extraMetadata 使用。
     packageVersion: normalizeVersion(rawVersion),
-    buildCommitId: resolveCommitId(),
+    buildCommitId,
     buildTime: new Date().toISOString(),
     electronBuilderVersion: resolveInstalledPackageVersion(
       "electron-builder",
