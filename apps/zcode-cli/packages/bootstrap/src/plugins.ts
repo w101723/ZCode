@@ -266,6 +266,26 @@ export function resolveZCodePlugins(options: ResolveZCodePluginsOptions = {}): P
   });
 }
 
+/**
+ * 用户可见插件条目的统一判据。
+ *
+ * node-repl-host 是 Browser Use 与 Computer Use 共用的运行时宿主：它必须留在官方 manifest
+ * 里（否则不会被发现、安装、启用），但没有 skill、没有 listing、没有图标，官方 CDN 目录
+ * 也根本不含它。把这样的条目透传给设置页，就会以「无图标 + 英文运行时描述」的样子露出
+ * （症状：插件列表出现一个 Blocks 兜底图的 node-repl-host）。官方 App 的目录里没有这个
+ * 条目，UI 也无从按 listing 区分「没配图标的真实插件」和「不对用户露出的宿主」，所以
+ * 过滤必须在服务端出口做，与 countVisibleMarketplacePlugins 的计数判据同源。
+ *
+ * 判据故意是「官方市场里的这个具名条目」而不是「没有 listing 的条目」——后者会误伤
+ * 第三方市场：自定义 manifest 的条目本来就可以不带 listing，它们是真实可见的插件。
+ */
+function isVisibleUserFacingPlugin(marketplaceId: string, pluginName: string): boolean {
+  return !(
+    marketplaceId === ZCODE_OFFICIAL_PLUGIN_MARKETPLACE &&
+    pluginName === OFFICIAL_NODE_REPL_HOST_PLUGIN_NAME
+  );
+}
+
 export function getZCodePluginsOverview(
   options: ResolveZCodePluginsOptions = {},
 ): ZCodePluginsOverviewData {
@@ -292,6 +312,8 @@ export function getZCodePluginsOverview(
 
   // 每个市场的 manifest 只读一次：同时取 entries（目录条目）与 featured（策展名单）。
   // zcode-plugins-official 的内置与 CDN 分片已在 adapter 层合并为唯一 canonical manifest。
+  // 条目宇宙按 isVisibleUserFacingPlugin 收口：用户不可见的宿主条目不进商店宇宙，
+  // 也不参与 join（installedPlugins 单独过滤，避免详情/更新角标为它生成幽灵行）。
   const catalogs: Array<{
     summary: ZCodeMarketplaceSummaryData;
     entries: PluginMarketplaceEntry[];
@@ -321,17 +343,19 @@ export function getZCodePluginsOverview(
   // 同时按 id 收集目录条目的商店信息，供已安装插件 join（详情/图标条/管理视图共用）。
   const listingByPluginId = new Map<string, PluginStoreListing>();
   const availablePlugins = catalogs.flatMap((catalog) =>
-    catalog.entries.map((entry) => {
-      const data = toAvailablePluginData(entry, catalog.summary.id, installedIds);
-      latestPinByPluginId.set(data.id, {
-        ...(entry.version ? { version: entry.version } : {}),
-        ...(readPluginSourceIdentityPin(entry.source)
-          ? { sha: readPluginSourceIdentityPin(entry.source) }
-          : {}),
-      });
-      if (entry.listing) listingByPluginId.set(data.id, entry.listing);
-      return data;
-    }),
+    catalog.entries
+      .filter((entry) => isVisibleUserFacingPlugin(catalog.summary.id, entry.name))
+      .map((entry) => {
+        const data = toAvailablePluginData(entry, catalog.summary.id, installedIds);
+        latestPinByPluginId.set(data.id, {
+          ...(entry.version ? { version: entry.version } : {}),
+          ...(readPluginSourceIdentityPin(entry.source)
+            ? { sha: readPluginSourceIdentityPin(entry.source) }
+            : {}),
+        });
+        if (entry.listing) listingByPluginId.set(data.id, entry.listing);
+        return data;
+      }),
   );
   const loadedById = new Map(outcome.plugins.map((plugin) => [plugin.id, plugin]));
 
@@ -361,27 +385,33 @@ export function getZCodePluginsOverview(
   return {
     marketplaces: catalogs.map((catalog) => catalog.summary),
     availablePlugins,
-    installedPlugins: installed.map((record) => {
-      const enabled = configResult.config.plugins.enabledPlugins[record.id] ?? false;
-      const data = toInstalledPluginData(record, enabled, loadedById.get(record.id));
-      const pin = latestPinByPluginId.get(record.id);
-      const installedSha = readPluginSourceIdentityPin(record.source);
-      const updateStatus = comparePluginUpdate({
-        installedVersion: data.version,
-        installedSha,
-        latestVersion: pin?.version,
-        latestSha: pin?.sha,
-      });
-      // latestVersion 展示：优先用 manifest 的 version；否则用最新 sha（短 7 位）让 UI 有可读提示。
-      const latestLabel = pin?.version ?? (pin?.sha ? pin.sha.slice(0, 7) : undefined);
-      const listing = listingByPluginId.get(record.id);
-      return {
-        ...data,
-        updateStatus,
-        ...(latestLabel ? { latestVersion: latestLabel } : {}),
-        ...(listing ? { listing } : {}),
-      };
-    }),
+    // 已安装列表同样按可见性收口：宿主条目随 seed 落进 installed_plugins.json，
+    // 但设置页管理视图/更新角标都不该为它生成行。运行时启用判断走 resolveZCodePlugins
+    // 的 outcome.plugins，不受这里过滤影响；「恢复」入口只服务 suppressedBuiltins，
+    // 宿主没有 listing 也就没有卸载入口，不需要出现在 restorableBuiltins。
+    installedPlugins: installed
+      .filter((record) => isVisibleUserFacingPlugin(record.marketplace, record.name))
+      .map((record) => {
+        const enabled = configResult.config.plugins.enabledPlugins[record.id] ?? false;
+        const data = toInstalledPluginData(record, enabled, loadedById.get(record.id));
+        const pin = latestPinByPluginId.get(record.id);
+        const installedSha = readPluginSourceIdentityPin(record.source);
+        const updateStatus = comparePluginUpdate({
+          installedVersion: data.version,
+          installedSha,
+          latestVersion: pin?.version,
+          latestSha: pin?.sha,
+        });
+        // latestVersion 展示：优先用 manifest 的 version；否则用最新 sha（短 7 位）让 UI 有可读提示。
+        const latestLabel = pin?.version ?? (pin?.sha ? pin.sha.slice(0, 7) : undefined);
+        const listing = listingByPluginId.get(record.id);
+        return {
+          ...data,
+          updateStatus,
+          ...(latestLabel ? { latestVersion: latestLabel } : {}),
+          ...(listing ? { listing } : {}),
+        };
+      }),
     restorableBuiltins,
     diagnostics: [
       ...outcome.diagnostics,
@@ -407,6 +437,13 @@ export function listZCodePlugins(options: ListZCodePluginsOptions = {}): PluginL
   const { pluginStorageRoot } = resolvePluginContext(options);
   return {
     ...outcome,
+    // plugins/list 是设置页 Installed/Built-in 分组与 TUI 列表的直接数据源：宿主条目
+    // 在这里同样按可见性收口，避免「无图标 + 运行时描述」的 node-repl-host 行露出。
+    // 注意只过滤展示出口；resolveZCodePlugins 的 outcome 仍是运行时权威（MCP 注册、
+    // rootPath 语义依赖完整条目），custom-commands/skills 等消费方拿不到这份拷贝。
+    plugins: outcome.plugins.filter((plugin) =>
+      isVisibleUserFacingPlugin(plugin.marketplace, plugin.name),
+    ),
     // 用户可见名称必须从 marketplace listing 解析；这里按完整 id 传递给 CLI，
     // 不把展示元数据混入 adapter 的运行时 PluginMetadata，也不按裸 name 猜测。
     pluginListingsById: loadPluginListingsById(pluginStorageRoot),
