@@ -103,8 +103,7 @@ export function createComputerUseRuntime(options = {}) {
 
       const response = await sendRequest(toolName, params, signal);
       if (response.ok !== true) {
-        const errorObj =
-          response.error && typeof response.error === "object" ? response.error : {};
+        const errorObj = response.error && typeof response.error === "object" ? response.error : {};
         const errorMsg =
           typeof response.error === "string"
             ? response.error

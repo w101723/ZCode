@@ -80,7 +80,9 @@ function syncWindowsCuaHelperManifest() {
     const addonHash = createHash("sha256").update(readFileSync(addonPath)).digest("hex");
 
     if (manifest.sha256?.entry !== entryHash || manifest.sha256?.addon !== addonHash) {
-      console.log("[prepare:runtime-assets] syncing windows-cua-helper runtime-manifest.json sha256 checksums");
+      console.log(
+        "[prepare:runtime-assets] syncing windows-cua-helper runtime-manifest.json sha256 checksums",
+      );
       manifest.sha256 = {
         entry: entryHash,
         addon: addonHash,

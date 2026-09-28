@@ -3259,7 +3259,9 @@ export function createZCodeAgentService(
     const resolve = options?.resolveDynamicWorkflowClientConfig;
     if (!resolve) {
       const envMode = normalizeDynamicWorkflowMode(process.env[ZCODE_DYNAMIC_WORKFLOW_MODE_ENV]);
-      return Promise.resolve(isDynamicWorkflowModeEnabled(envMode ?? DEFAULT_DYNAMIC_WORKFLOW_MODE));
+      return Promise.resolve(
+        isDynamicWorkflowModeEnabled(envMode ?? DEFAULT_DYNAMIC_WORKFLOW_MODE),
+      );
     }
     dynamicWorkflowGate ??= (async () => {
       try {

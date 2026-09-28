@@ -71,6 +71,7 @@ export function resolveDynamicWorkflowClientConfig(input: {
       ? (input.remote as { mode?: unknown }).mode
       : undefined,
   );
-  if (remoteMode && remoteMode !== "disabled") return createDynamicWorkflowClientConfig(remoteMode, "remote");
+  if (remoteMode && remoteMode !== "disabled")
+    return createDynamicWorkflowClientConfig(remoteMode, "remote");
   return createDynamicWorkflowClientConfig(DEFAULT_DYNAMIC_WORKFLOW_MODE, "default");
 }

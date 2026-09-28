@@ -1,27 +1,27 @@
 import { join } from "node:path";
 import type { SkillRoot } from "@zcode/contracts";
+import { DYNAMIC_WORKFLOW_SKILL_NAME } from "./bundled-skills.js";
 
 /**
- * 动态工作流灰度门在 App 装配层的两处减法。
- * 工具面的减法在 core 的 registerBuiltInTools，`/` 目录的减法在 zcode-protocol/slash-commands.ts；
- * 这里只放「命令展开」和「技能发现」这两项需要 bootstrap 侧常量/路径推导的。
+ * App 装配层按动态工作流开关过滤配套技能。
+ * 工具面的减法在 core 的 registerBuiltInTools，`/` 目录与 `/workflow` 展开的减法分别在
+ * zcode-protocol/slash-commands.ts 与 builtin-prompt-command.ts；这里只放需要 bootstrap 侧路径推导的技能剔除。
  */
-
-/** 灰度关闭时不允许展开的自定义命令名；`workflow` 命令与动态工作流相关。 */
-export const DYNAMIC_WORKFLOW_GATED_COMMAND_NAMES: readonly string[] = ["workflow"];
-
-/** 系统内置技能里工作流编写指南技能的目录名（skills/<dir>/SKILL.md）。 */
-const DYNAMIC_WORKFLOW_SKILL_DIRECTORY_NAME = "dynamic-workflows";
 
 const SKILL_MANIFEST_FILE_NAME = "SKILL.md";
 
 /**
- * 灰度关闭时要从技能发现中剔除的 SKILL.md 绝对路径。
+ * 动态工作流关闭时要从技能发现中剔除的 SKILL.md 绝对路径。
+ *
+ * 为什么按路径而不是按 root 过滤：NodeSkillAdapter 只提供 `disabledPaths` 这一个剔除机制
+ * （config.json 的 `skill.<path>.enable=false` 走的也是它）。传入的是内置技能包的根
+ * （bundled-skills.ts），路径不存在时只是一个永不命中的 Set 成员，没有副作用；技能包日后再放
+ * 与动态工作流开关无关的技能时，它们也不会被连坐。
  */
 export function collectDynamicWorkflowDisabledSkillPaths(
-  skillRoots: readonly SkillRoot[],
+  bundledSkillRoots: readonly SkillRoot[],
 ): string[] {
-  return skillRoots.map((root) =>
-    join(root.path, DYNAMIC_WORKFLOW_SKILL_DIRECTORY_NAME, SKILL_MANIFEST_FILE_NAME),
+  return bundledSkillRoots.map((root) =>
+    join(root.path, DYNAMIC_WORKFLOW_SKILL_NAME, SKILL_MANIFEST_FILE_NAME),
   );
 }
