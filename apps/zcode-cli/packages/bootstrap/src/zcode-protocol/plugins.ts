@@ -37,6 +37,7 @@ import {
   describeZCodePlugin,
   getZCodePluginsOverview,
   installZCodeMarketplacePlugin,
+  isVisibleUserFacingPlugin,
   removeZCodePluginMarketplace,
   resolveZCodePlugins,
   resetZCodePluginConfig,
@@ -213,7 +214,13 @@ export async function listPlugins(
     logger: context.logger,
     workingDirectory: params.workspace.workspacePath,
   });
-  const plugins = outcome.plugins.map((plugin) => toPluginInfo(plugin, configResult));
+  // 设置页行数据的直接来源。outcome.plugins 是运行时权威（宿主条目必须在场，MCP 注册
+  // 依赖它），但 list 出口是展示面：node-repl-host 这类非用户向条目在这里过滤，
+  // 判据与 getZCodePluginsOverview/listZCodePlugins 同源，三处不会各自漂移。
+  // missing 投影按已过滤的 id 集合生成，避免为宿主配置生成「未安装」幽灵行。
+  const plugins = outcome.plugins
+    .filter((plugin) => isVisibleUserFacingPlugin(plugin.marketplace, plugin.name))
+    .map((plugin) => toPluginInfo(plugin, configResult));
   return {
     plugins: [
       ...plugins,

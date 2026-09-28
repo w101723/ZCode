@@ -15,6 +15,7 @@ import type { PluginReferenceCatalogEntry } from "@zcode/contracts";
 import { buildPluginReferenceCatalog } from "@zcode/core";
 import {
   getZCodePluginsOverview,
+  isVisibleUserFacingPlugin,
   resolveZCodePlugins,
   updateZCodePluginMarketplace,
 } from "../plugins.js";
@@ -23,6 +24,14 @@ import {
   requireSession,
   type ZCodeProtocolAgentServerContext,
 } from "./server-types.js";
+
+// Picker 是插件引用的展示面：node-repl-host 这类非用户向宿主条目不进 Picker
+//（无 skill/command/agent 可引用，露出只会得到一个 Blocks 兜底图标）。
+// session 冻结 catalog 与 workspace 现扫 catalog 用同一判据收口；运行时
+// resolveBuiltInNodeReplMcpServers 不经此处，不受影响。
+function isVisibleReferenceCatalogEntry(entry: PluginReferenceCatalogEntry): boolean {
+  return isVisibleUserFacingPlugin(entry.marketplace, entry.name);
+}
 
 // Picker 权威：带 sessionId → 该 Session 创建时冻结的 identity catalog（session-owned）；
 // 不带 → workspace 当前 catalog（新建草稿）。session 不存在时按协议错误 fail closed，
@@ -42,7 +51,8 @@ export async function getPluginReferenceCatalog(
       authority: "session",
       plugins: record.app
         .getPluginReferenceCatalog()
-        .plugins.map((entry) => toReferenceCatalogEntry(entry, displayByPluginId, includeCategory)),
+        .plugins.filter(isVisibleReferenceCatalogEntry)
+        .map((entry) => toReferenceCatalogEntry(entry, displayByPluginId, includeCategory)),
     };
   }
   const outcome = resolveZCodePlugins({
@@ -53,9 +63,9 @@ export async function getPluginReferenceCatalog(
   );
   return {
     authority: "workspace",
-    plugins: buildPluginReferenceCatalog(outcome.plugins).plugins.map((entry) =>
-      toReferenceCatalogEntry(entry, displayByPluginId, includeCategory),
-    ),
+    plugins: buildPluginReferenceCatalog(outcome.plugins)
+      .plugins.filter(isVisibleReferenceCatalogEntry)
+      .map((entry) => toReferenceCatalogEntry(entry, displayByPluginId, includeCategory)),
   };
 }
 

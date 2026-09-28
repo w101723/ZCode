@@ -278,8 +278,12 @@ export function resolveZCodePlugins(options: ResolveZCodePluginsOptions = {}): P
  *
  * 判据故意是「官方市场里的这个具名条目」而不是「没有 listing 的条目」——后者会误伤
  * 第三方市场：自定义 manifest 的条目本来就可以不带 listing，它们是真实可见的插件。
+ *
+ * 导出供 zcode-protocol 层的 plugins/list RPC handler 复用：该 handler 直接消费
+ * resolveZCodePlugins（运行时权威，不做展示过滤），桌面设置页的行数据全部来自这条
+ * RPC 路径，CLI 的 listZCodePlugins 过滤覆盖不到它。
  */
-function isVisibleUserFacingPlugin(marketplaceId: string, pluginName: string): boolean {
+export function isVisibleUserFacingPlugin(marketplaceId: string, pluginName: string): boolean {
   return !(
     marketplaceId === ZCODE_OFFICIAL_PLUGIN_MARKETPLACE &&
     pluginName === OFFICIAL_NODE_REPL_HOST_PLUGIN_NAME
