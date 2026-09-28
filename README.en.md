@@ -150,6 +150,8 @@ The artifact identity is controlled by `ZCODE_ENV`: `production` builds the offi
 
 The default target is macOS arm64, and the default output directory is `packages/desktop/dist/`. `--os` accepts `mac`, `win`, or `linux`; `--arch` accepts `x64` or `arm64`. Packaging and signing require the tools and configuration for the target platform.
 
+After packaging, `bundle` runs automatic artifact verification automatically: app.asar runtime dependency closure and native-boundary checks, plus a startup handshake of the bundled agent (`verify-packaged-agent-bundle.mjs` actually runs `resources/glm/zcode.cjs --prepare-storage` under the desktop host's storage-preparation protocol, with storage writes isolated into temp dirs). An agent that crashes at startup (e.g. a missing shared help-table entry throwing at module load) fails directly on the build machine instead of shipping a broken installer.
+
 #### Built-in official plugins and local backfill (optional)
 
 Official plugins bundled with the desktop app are staged by `prepare:agent-bundle` into `packages/desktop/bundled-agents/<platform>/glm/packages/`. The open-source repository only ships browser-use-plugin and node-repl-host; the source packages of the remaining official plugins are not published with the repository (zcode-guide, image-search, and plugin-creator have no extractable source at all). If the official ZCode.app is installed locally, you can backfill from it:

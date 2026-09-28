@@ -154,6 +154,8 @@ pnpm bundle:desktop -- --help
 
 默认目标为 macOS arm64，默认输出目录为 `packages/desktop/dist/`。`--os` 支持 `mac`、`win`、`linux`，`--arch` 支持 `x64`、`arm64`；实际打包与签名需要目标平台对应的工具和配置。
 
+打包完成后 `bundle` 会自动执行产物校验：app.asar 依赖闭包与 native 越界检查，以及内置 agent 的启动握手（`verify-packaged-agent-bundle.mjs` 按桌面 host 的存储准备协议真实运行 `resources/glm/zcode.cjs --prepare-storage`，存储写入隔离到临时目录）。agent 启动即崩（如共享 help 表缺条目导致模块加载期 throw）会在打包机上直接失败，不会流出坏安装包。
+
 安装：双击打开产物 DMG，将 ZCode 拖入"应用程序"。本地构建未签名，首次打开若被 macOS 拦截，执行：
 
 ```bash

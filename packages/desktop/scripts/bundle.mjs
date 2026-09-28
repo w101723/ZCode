@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { collectRuntimeModuleClosureEntries } from "./runtime-dependency-closure.mjs";
 import { resolveDesktopProductIdentity } from "./desktop-product-identity.mjs";
+import { verifyPackagedAgentBundle } from "./verify-packaged-agent-bundle.mjs";
 import {
   findDesktopNativePackageViolations,
   parseAsarListWithPackState,
@@ -255,6 +256,10 @@ function printHelp() {
   --skip-build                 跳过 pnpm build
   --dry-run                    只打印最终命令，不执行打包
   -h, --help                   查看帮助
+
+打包完成后自动执行产物校验：
+  app.asar 依赖闭包与 native 越界检查 + agent bundle 启动握手
+  （verify-packaged-agent-bundle.mjs，按桌面 host 的存储准备协议真实跑一遍）。
 
 环境变量:
   ZCODE_TARGET_OS              与 --os 等价
@@ -739,6 +744,11 @@ async function main() {
   runTimedSync("bundle:verify-runtime-dependencies", () =>
     verifyPackagedRuntimeDependencies(os, arch),
   );
+
+  // asar 依赖闭包校验覆盖不了 agent bundle 的启动健康：v3.14.3 合并时 shared help 表
+  // 漏了 workflow 条目，zcode.cjs 模块加载期 throw，安装包照常产出，用户首启才崩。
+  // 这里按桌面 host 的存储准备协议真实握手一次，让“agent 启动即崩”在打包机上直接失败。
+  await runTimedAsync("bundle:verify-agent-bundle", () => verifyPackagedAgentBundle({ os, arch }));
 
   const artifactPath = findBuiltArtifact(os, arch);
   runTimedSync("bundle:audit-bundle-size", () =>
