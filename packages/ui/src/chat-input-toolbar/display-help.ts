@@ -1,19 +1,21 @@
-import type { ZCodeProvider } from "@zcode/shared";
+export type ModeDisplayFamily = "glm" | "claude" | "codex" | "gemini" | "opencode";
 
-export const ZCODE_MODE_OPTION_LABEL_IDS: Record<ZCodeProvider, Record<string, string>> = {
-  glm: {
-    build: "mode.label.glm.build",
-    edit: "mode.label.glm.edit",
-    plan: "mode.label.glm.plan",
-    yolo: "mode.label.glm.yolo",
-  },
+const modesByFamily: Record<ModeDisplayFamily, readonly string[]> = {
+  glm: ["default", "build", "edit", "plan", "yolo"],
+  claude: ["auto", "default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"],
+  codex: ["read-only", "auto", "agent", "full-access", "agent-full-access"],
+  gemini: ["default", "autoEdit", "yolo", "plan"],
+  opencode: ["build", "plan"],
 };
 
-export const ZCODE_MODE_OPTION_DESCRIPTION_IDS: Record<ZCodeProvider, Record<string, string>> = {
-  glm: {
-    build: "mode.description.glm.build",
-    edit: "mode.description.glm.edit",
-    plan: "mode.description.glm.plan",
-    yolo: "mode.description.glm.yolo",
-  },
-};
+function createModeMessageIds(kind: "label" | "description") {
+  return Object.fromEntries(
+    Object.entries(modesByFamily).map(([family, modes]) => [
+      family,
+      Object.fromEntries(modes.map((mode) => [mode, `mode.${kind}.${family}.${mode}`])),
+    ]),
+  ) as Record<ModeDisplayFamily, Record<string, string>>;
+}
+
+export const ZCODE_MODE_OPTION_LABEL_IDS = createModeMessageIds("label");
+export const ZCODE_MODE_OPTION_DESCRIPTION_IDS = createModeMessageIds("description");

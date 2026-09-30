@@ -12,6 +12,8 @@ import { AlertTriangleIcon, CheckIcon, ChevronDownIcon, LoaderIcon, Plus } from 
 import {
   TID_DOCKER_CONTAINER_INPUT,
   TID_DOCKER_CONTAINER_SELECT,
+  TID_SERVER_URL_INPUT,
+  TID_SERVER_TOKEN_INPUT,
   TID_SSH_CONFIG_ALIAS_SELECT,
   TID_SSH_AUTH_PASSWORD,
   TID_SSH_AUTH_PRIVATE_KEY,
@@ -97,6 +99,12 @@ export function RemoteConnectionFields({
   setWslUser,
   setDockerContainer,
   setManualDockerContainer,
+  serverUrl = "",
+  serverToken = "",
+  serverName = "",
+  setServerUrl,
+  setServerToken,
+  setServerName,
 }: {
   kind: RemoteTarget["kind"];
   host: string;
@@ -135,6 +143,12 @@ export function RemoteConnectionFields({
   setWslUser?: (value: string) => void;
   setDockerContainer: (value: string) => void;
   setManualDockerContainer: (value: string) => void;
+  serverUrl?: string;
+  serverToken?: string;
+  serverName?: string;
+  setServerUrl?: (value: string) => void;
+  setServerToken?: (value: string) => void;
+  setServerName?: (value: string) => void;
 }) {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
@@ -707,6 +721,51 @@ export function RemoteConnectionFields({
                 {intl.formatMessage({ id: "docker.manualContainerHint" })}
               </p>
             ) : null}
+          </div>
+        </div>
+      );
+    case "server":
+      return (
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-ui-base text-foreground-subtle">
+              {intl.formatMessage({ id: "server.url" })}
+            </label>
+            <Input
+              size="lg"
+              className="h-9 text-ui-base"
+              value={serverUrl}
+              onChange={(e) => setServerUrl?.(e.target.value)}
+              placeholder="http://127.0.0.1:3030"
+              data-testid={TID_SERVER_URL_INPUT}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-ui-base text-foreground-subtle">
+              {intl.formatMessage({ id: "server.token" })}
+            </label>
+            <Input
+              size="lg"
+              className="h-9 text-ui-base"
+              type="password"
+              value={serverToken}
+              onChange={(e) => setServerToken?.(e.target.value)}
+              placeholder={intl.formatMessage({ id: "server.tokenPlaceholder" })}
+              data-testid={TID_SERVER_TOKEN_INPUT}
+              autoComplete="off"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-ui-base text-foreground-subtle">
+              {intl.formatMessage({ id: "server.name" })}
+            </label>
+            <Input
+              size="lg"
+              className="h-9 text-ui-base"
+              value={serverName}
+              onChange={(e) => setServerName?.(e.target.value)}
+              placeholder={intl.formatMessage({ id: "server.namePlaceholder" })}
+            />
           </div>
         </div>
       );

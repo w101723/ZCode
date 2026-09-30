@@ -200,6 +200,35 @@ export function getWorkspaceHash(workspacePath: string, workspaceIdentity?: stri
     .slice(0, 12);
 }
 
+export function getProviderWorkspaceZCodeConfigIsolationDir(
+  provider: string,
+  workspacePath: string,
+  workspaceIdentity?: string,
+): string {
+  return join(
+    getAppConfigDir(),
+    "agent-config",
+    provider,
+    getWorkspaceHash(workspacePath, workspaceIdentity),
+  );
+}
+
+export function getProviderWorkspaceConfigDir(
+  provider: string,
+  workspacePath: string,
+  workspaceIdentity?: string,
+): string {
+  if (provider === "glm") {
+    return join(getDataBaseDir(), ".zcode", "cli");
+  }
+  const root = getProviderWorkspaceZCodeConfigIsolationDir(
+    provider,
+    workspacePath,
+    workspaceIdentity,
+  );
+  return provider === "gemini" ? join(root, ".gemini") : root;
+}
+
 /** ~/.zcode/v2/sessions/{workspaceHash} */
 function getTaskSessionDir(workspacePath: string, workspaceIdentity?: string): string {
   return join(getAppConfigDir(), "sessions", getWorkspaceHash(workspacePath, workspaceIdentity));

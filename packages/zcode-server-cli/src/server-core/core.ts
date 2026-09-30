@@ -42,7 +42,22 @@ export async function runServerCore(generation: number): Promise<void> {
     serviceAuthorityMode: "standalone-server",
   });
   const taskActivityTracker = createTaskActivityTracker(services.getOptional(IZCodeAgentService));
-  const http = await createCoreHttpServer(services, { serverId: await resolveCoreServerId() });
+  const authToken =
+    process.env["ZCODE_SERVER_AUTH_TOKEN"]?.trim() ||
+    process.env["ZCODE_SERVER_TOKEN"]?.trim() ||
+    undefined;
+  const allowedWebOriginsEnv = process.env["ZCODE_SERVER_ALLOWED_WEB_ORIGINS"]?.trim();
+  const allowedWebOrigins = allowedWebOriginsEnv
+    ? allowedWebOriginsEnv
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : undefined;
+  const http = await createCoreHttpServer(services, {
+    serverId: await resolveCoreServerId(),
+    ...(authToken ? { authToken } : {}),
+    ...(allowedWebOrigins ? { allowedWebOrigins } : {}),
+  });
   const send = (message: unknown): Promise<void> => {
     if (typeof process.send !== "function" || process.connected === false) return Promise.resolve();
     return new Promise((resolve) => {

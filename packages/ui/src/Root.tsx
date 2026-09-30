@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- Root 当前集中编排启动和 workspace shell wiring，先保持入口收口避免跨层状态拆散。 */
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LucideProvider, RefreshCw } from "lucide-react";
 import {
   APP_RUNTIME_PREFERENCES_CHANGED_BROADCAST_CHANNEL,
@@ -18,6 +18,8 @@ import { useTokenRefresh } from "@/hooks/useTokenRefresh.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { SSHDialog } from "@/SSHDialog.js";
+import { ServerReconnectDialog } from "@/remote-connection/ServerReconnectDialog.js";
+import type { ReconnectRemoteWorkspaceOptions } from "@/root/reconnectRemoteWorkspaceHistoryEntry.js";
 import { SettingsPage } from "@/SettingsPage.js";
 import { CodingPlanUpgradeDialogProvider } from "@/settings/CodingPlanUpgradeDialogProvider.js";
 import { WelcomeScreen, type LoginCompleteReason } from "@/WelcomeScreen.js";
@@ -157,6 +159,7 @@ function RootInner({
   preferDirectoryBrowser,
   supportsEmbeddedBrowser: explicitSupportsEmbeddedBrowser,
   allowRemoteWorkspace = true,
+  remoteConnectionKinds,
   initialWorkspaceLoadingFallback,
 }: RootProps) {
   useEffect(() => {
@@ -230,6 +233,11 @@ function RootInner({
   const [remoteConnectionDialogOpen, setRemoteConnectionDialogOpen] = useState(false);
   const [remoteConnectionOpenPreference, setRemoteConnectionOpenPreference] =
     useState<RemoteConnectionOpenPreference | null>(null);
+  const [serverReconnectRequest, setServerReconnectRequest] = useState<{
+    workspaceKey: string;
+    serverUrl: string;
+    options?: ReconnectRemoteWorkspaceOptions;
+  } | null>(null);
   const [directoryBrowserOpen, setDirectoryBrowserOpen] = useState(false);
   const [remoteConnectionInProgress, setRemoteConnectionInProgress] = useState(false);
   const [remoteConnectionRequestId, setRemoteConnectionRequestId] = useState<string | null>(null);
@@ -533,6 +541,7 @@ function RootInner({
     platform,
     supportsSettings,
     allowRemoteWorkspace,
+    persistServerCredentials: Boolean(isDesktop),
     // conversation backing workspace 只属于本地桌面主恢复链路；远程窗口和手机
     // shared-host attachment 不能因此创建独立本地 runtime 或改变 replayable 边界。
     ensureConversationWorkspaceOnRestore: isDesktop && restoreSession && !initialWorkspaceIdentity,
@@ -880,6 +889,35 @@ function RootInner({
       workspaceShellPath,
     ],
   );
+  const handleReconnectWithCredential = useCallback(
+    async (workspaceKey: string, options?: ReconnectRemoteWorkspaceOptions) => {
+      const entry = remoteWorkspaceSessions.find(
+        (session) => (session.workspaceIdentity?.trim() || session.workspacePath) === workspaceKey,
+      );
+      if (!isDesktop && entry?.target.kind === "server") {
+        setServerReconnectRequest({ workspaceKey, serverUrl: entry.target.serverUrl, options });
+        return;
+      }
+      await handleReconnectRemoteWorkspace(workspaceKey, options);
+    },
+    [handleReconnectRemoteWorkspace, isDesktop, remoteWorkspaceSessions],
+  );
+
+  const serverReconnectDialog = serverReconnectRequest ? (
+    <ServerReconnectDialog
+      serverUrl={serverReconnectRequest.serverUrl}
+      onCancel={() => setServerReconnectRequest(null)}
+      onSubmit={(token) => {
+        const request = serverReconnectRequest;
+        setServerReconnectRequest(null);
+        void handleReconnectRemoteWorkspace(request.workspaceKey, {
+          ...request.options,
+          serverTokenOverride: token,
+        });
+      }}
+    />
+  ) : null;
+
   const handleRemoteConnectionDialogOpenChange = useCallback((open: boolean) => {
     setRemoteConnectionDialogOpen(open);
     if (!open) {
@@ -900,6 +938,7 @@ function RootInner({
       onFlowActiveChange={setRemoteConnectionInProgress}
       onFlowRequestIdChange={setRemoteConnectionRequestId}
       preferredKind={remoteConnectionOpenPreference?.preferredKind}
+      supportedKinds={remoteConnectionKinds}
       preferredWslDistro={remoteConnectionOpenPreference?.preferredWslDistro}
       hideTriggerWhenClosed
     />
@@ -949,6 +988,7 @@ function RootInner({
       <RootShell>
         {rootModelSelectionErrorNode}
         {remoteConnectionDialog}
+        {serverReconnectDialog}
         {directoryBrowserDialog}
         {/* HTML 启动壳已经展示 ZCode SVG，但 React 接管 root 后旧壳会被整棵替换。
             之前阻塞恢复 tab / 初始 workspace 注入时重新渲染纯文字“加载中...”，所以启动被拆成两套 loading。
@@ -963,6 +1003,7 @@ function RootInner({
       <RootShell>
         {rootModelSelectionErrorNode}
         {remoteConnectionDialog}
+        {serverReconnectDialog}
         {directoryBrowserDialog}
         <WelcomeScreen onComplete={handleWelcomeScreenComplete} />
       </RootShell>
@@ -990,6 +1031,7 @@ function RootInner({
     <RootShell>
       {rootModelSelectionErrorNode}
       {remoteConnectionDialog}
+      {serverReconnectDialog}
       {directoryBrowserDialog}
       <OccupationOnboarding
         showWindowControls={Boolean(isWindowsDesktop || (isDesktop && !isMacDesktop))}
@@ -1021,7 +1063,7 @@ function RootInner({
             handleConnectRemote={handleConnectRemote}
             handleSelectRemoteProject={handleSelectRemoteProject}
             handleCancelRemoteProject={handleCancelRemoteProject}
-            handleReconnectRemoteWorkspace={handleReconnectRemoteWorkspace}
+            handleReconnectRemoteWorkspace={handleReconnectWithCredential}
             handleCreateTask={handleCreateTask}
             handleCreateConversationTask={handleCreateConversationTask}
             handleResolveConversationWorkspace={handleResolveConversationWorkspace}

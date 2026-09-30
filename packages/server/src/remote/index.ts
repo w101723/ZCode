@@ -33,3 +33,9 @@ export {
   type WSLDistro,
   parseWSLDistroList,
 } from "./wsl-detect.js";
+export {
+  connectServerRemote,
+  normalizeServerHttpUrl,
+  toWebSocketUrl,
+  type ConnectServerRemoteResult,
+} from "./server-connector.js";

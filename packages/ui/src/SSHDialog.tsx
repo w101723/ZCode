@@ -1,6 +1,11 @@
 /* eslint-disable max-lines -- 远程连接向导的状态编排暂集中在同一组件，后续有独立拆分计划。 */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { createUuid, type RemoteTarget, type RemoteWorkspaceSessionEntry } from "@zcode/shared";
+import {
+  createUuid,
+  stripRemoteTargetSecrets,
+  type RemoteTarget,
+  type RemoteWorkspaceSessionEntry,
+} from "@zcode/shared";
 import {
   TID_SSH_CONNECT_TRIGGER,
   TID_SSH_DIALOG,
@@ -22,8 +27,12 @@ import {
   withDefaultRemoteResourcePackages,
 } from "@/lib/remoteConnectionWizard.js";
 import {
+  bumpRemoteConnectionGeneration,
+  cleanupRemoteConnectionDialogOnUnmount,
+  createRemoteConnectionGenerationState,
   getRemoteConnectionCompletionDialogState,
   getRemoteConnectionDirectoryFailureState,
+  isCurrentRemoteConnectionGeneration,
   isRemoteConnectionFlowActive,
   shouldResetRemoteConnectionOnOpen,
 } from "@/lib/remoteConnectionDialogState.js";
@@ -61,6 +70,7 @@ interface RemoteConnectionDialogProps {
   onFlowActiveChange?: (active: boolean) => void;
   onFlowRequestIdChange?: (requestId: string | null) => void;
   preferredKind?: RemoteTarget["kind"];
+  supportedKinds?: RemoteTarget["kind"][];
   preferredWslDistro?: string;
 }
 
@@ -81,6 +91,7 @@ export function RemoteConnectionDialog({
   onFlowActiveChange,
   onFlowRequestIdChange,
   preferredKind,
+  supportedKinds,
   preferredWslDistro,
 }: RemoteConnectionDialogProps) {
   const { intl } = useZCodeIntl();
@@ -88,6 +99,15 @@ export function RemoteConnectionDialog({
   const cancelPendingRemoteConnection = useCancelPendingRemoteConnection();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  // loadingRef 用于在同步/同一 tick 事件中做严格守卫，防止连续点击穿透引发重复连接
+  const loadingRef = useRef(false);
+  // activeRequestGenerationRef 为活动连接请求所有者，自增用于废弃陈旧异步回调
+  const generationStateRef = useRef(createRemoteConnectionGenerationState());
+  // connectingRequestIdRef 与 connectedSessionIdRef 用于同步跟踪未绑定请求与会话，避免异步闭包陈旧
+  const connectingRequestIdRef = useRef<string | null>(null);
+  const connectedSessionIdRef = useRef<string | null>(null);
+  // isSessionBoundRef 跟踪会话所有权是否已成功转移给工作区，防止卸载清理误释放已绑定的工作区会话
+  const isSessionBoundRef = useRef(false);
   const [error, setError] = useState("");
   const [validationMessage, setValidationMessage] = useState("");
   const [currentStep, setCurrentStep] = useState<RemoteWizardStep>("kind");
@@ -112,6 +132,9 @@ export function RemoteConnectionDialog({
     wslUser,
     dockerContainer,
     manualDockerContainer,
+    serverUrl,
+    serverToken,
+    serverName,
     sshConfigAliases,
     sshConfigAliasesLoading,
     sshConfigAliasesError,
@@ -133,6 +156,9 @@ export function RemoteConnectionDialog({
     setWslUser,
     setDockerContainer,
     setManualDockerContainer,
+    setServerUrl,
+    setServerToken,
+    setServerName,
     refreshDockerContainers,
     applySshConfigAlias,
     clearSelectedSshConfigAlias,
@@ -142,6 +168,7 @@ export function RemoteConnectionDialog({
     open,
     isWindowsDesktop,
     preferredKind,
+    supportedKinds,
     preferredWslDistro,
   });
   const directoryBrowserServices = useRemoteWorkspaceSessionStore((state) =>
@@ -158,12 +185,46 @@ export function RemoteConnectionDialog({
   );
   const flowActive = isRemoteConnectionFlowActive(flowSnapshot);
 
+  // 保持对外部回调与流转状态的最新同步引用，避免卸载清理闭包陈旧
+  const cancelPendingRemoteConnectionRef = useRef(cancelPendingRemoteConnection);
+  cancelPendingRemoteConnectionRef.current = cancelPendingRemoteConnection;
+  const onCancelSessionRef = useRef(onCancelSession);
+  onCancelSessionRef.current = onCancelSession;
+  const onFlowActiveChangeRef = useRef(onFlowActiveChange);
+  onFlowActiveChangeRef.current = onFlowActiveChange;
+  const onFlowRequestIdChangeRef = useRef(onFlowRequestIdChange);
+  onFlowRequestIdChangeRef.current = onFlowRequestIdChange;
+  const flowActiveRef = useRef(flowActive);
+  flowActiveRef.current = flowActive;
+
   useEffect(() => {
     onFlowActiveChange?.(flowActive);
   }, [flowActive, onFlowActiveChange]);
 
+  // 组件卸载时执行生命周期安全清理，释放未绑定会话并废弃陈旧代数
+  useEffect(() => {
+    return () => {
+      cleanupRemoteConnectionDialogOnUnmount({
+        generationState: generationStateRef.current,
+        pendingRequestId: connectingRequestIdRef.current,
+        connectedSessionId: connectedSessionIdRef.current,
+        isSessionBound: isSessionBoundRef.current,
+        cancelPendingRequest: (requestId) => {
+          void cancelPendingRemoteConnectionRef.current(requestId);
+        },
+        cancelSession: (sessionId) => {
+          void onCancelSessionRef.current(sessionId);
+        },
+        onFlowActiveChange: onFlowActiveChangeRef.current,
+        onFlowRequestIdChange: onFlowRequestIdChangeRef.current,
+        wasFlowActive: flowActiveRef.current,
+      });
+    };
+  }, []);
+
   const updateConnectingRequestId = useCallback(
     (requestId: string | null) => {
+      connectingRequestIdRef.current = requestId;
       setConnectingRequestId(requestId);
       onFlowRequestIdChange?.(requestId);
     },
@@ -203,12 +264,24 @@ export function RemoteConnectionDialog({
 
   const closeDialog = useCallback(
     (options?: { preserveSession?: boolean }) => {
-      const sessionId = connectedSessionId;
+      // 关闭弹窗时递增 generation，使任何正在等待的异步连接结果失效
+      bumpRemoteConnectionGeneration(generationStateRef.current);
+      loadingRef.current = false;
+
+      // 关闭弹窗时彻底清理敏感凭据 Token
+      setServerToken("");
+
+      const sessionId = connectedSessionIdRef.current ?? connectedSessionId;
+      const reqId = connectingRequestIdRef.current ?? connectingRequestId;
+      connectingRequestIdRef.current = null;
+      connectedSessionIdRef.current = null;
+      isSessionBoundRef.current = false;
+
       if (!options?.preserveSession && sessionId) {
         void handleCancelSession(sessionId);
       } else if (!options?.preserveSession && loading && currentStep === "connecting") {
         // 连接过程里 sessionId 尚未返回时，关闭弹窗会只重置 UI；这里补上显式取消，确保后台下载同步停止。
-        void cancelPendingRemoteConnection(connectingRequestId ?? undefined);
+        void cancelPendingRemoteConnection(reqId ?? undefined);
       }
       resetFeedback();
       setLoading(false);
@@ -228,6 +301,7 @@ export function RemoteConnectionDialog({
       handleCancelSession,
       loading,
       resetDirectorySelectionState,
+      setServerToken,
       updateConnectingRequestId,
     ],
   );
@@ -267,11 +341,16 @@ export function RemoteConnectionDialog({
   const startRemoteConnection = async (target: RemoteTarget) => {
     const nextTarget = withDefaultRemoteResourcePackages(target);
 
-    if (loading) {
-      // React 还没来得及把按钮置 disabled 时，快速重复点击会启动多个 SSH host process。
-      // 这里在事件入口再做一次并发保护，避免同一个 dialog 产生多条部署流并把上传进度混在一起。
+    // 用 loadingRef 防御同一 tick 内多次触发的并发连接，避免同一个 dialog 启动多个进程
+    if (loadingRef.current || loading) {
       return;
     }
+    loadingRef.current = true;
+
+    // 分配新请求代数（generation），作为当前连接请求的唯一所有者
+    const thisGeneration = bumpRemoteConnectionGeneration(generationStateRef.current);
+    isSessionBoundRef.current = false;
+    connectedSessionIdRef.current = null;
 
     setPendingRemoteTarget(nextTarget);
     setLoading(true);
@@ -289,12 +368,36 @@ export function RemoteConnectionDialog({
     });
     try {
       const sessionId = await onConnect(nextTarget, requestId);
+
+      // 检查是否仍为当前代数请求；若用户已取消、返回或关闭弹窗，则丢弃迟到的成功连接并销毁 session，绝不重新打开或覆盖步骤
+      if (!isCurrentRemoteConnectionGeneration(generationStateRef.current, thisGeneration)) {
+        logger.info("[SSHDialog] 异步连接成功但请求已过期，立即释放会话:", { sessionId });
+        void handleCancelSession(sessionId);
+        return;
+      }
+
+      // 连接成功：清空 serverToken 避免泄露；pendingRemoteTarget 脱敏保存
+      if (nextTarget.kind === "server") setServerToken("");
+      setPendingRemoteTarget(stripRemoteTargetSecrets(nextTarget));
+
+      connectingRequestIdRef.current = null;
+      connectedSessionIdRef.current = sessionId;
+      isSessionBoundRef.current = false;
+
       const completionState = getRemoteConnectionCompletionDialogState("success");
       setConnectedSessionId(sessionId);
       setCurrentStep(completionState.step);
       applyOpenState(completionState.open);
       trace.complete({ resultSource: "platform_result" });
     } catch (connectError) {
+      // 检查是否仍为当前代数请求；若请求已过期，则静默忽略错误，不重新打开弹窗或覆盖用户操作
+      if (!isCurrentRemoteConnectionGeneration(generationStateRef.current, thisGeneration)) {
+        return;
+      }
+
+      connectingRequestIdRef.current = null;
+
+      // 连接失败：保留未脱敏的 pendingRemoteTarget 以便用户点击重试
       const completionState = getRemoteConnectionCompletionDialogState("error");
       const errorMessage = getErrorMessage(connectError);
       setError(errorMessage);
@@ -302,12 +405,17 @@ export function RemoteConnectionDialog({
       applyOpenState(completionState.open);
       trace.fail({ failureStage: "remote_connect" });
     } finally {
-      setLoading(false);
+      // 只有当前 generation 结束时才解除 loading
+      if (isCurrentRemoteConnectionGeneration(generationStateRef.current, thisGeneration)) {
+        loadingRef.current = false;
+        setLoading(false);
+        connectingRequestIdRef.current = null;
+      }
     }
   };
 
   const handleConnect = async () => {
-    if (loading) {
+    if (loadingRef.current || loading) {
       // React 还没来得及把按钮置 disabled 时，快速重复点击会启动多个 SSH host process。
       // 这里在事件入口再做一次并发保护，避免同一个 dialog 产生多条部署流并把上传进度混在一起。
       return;
@@ -328,6 +436,9 @@ export function RemoteConnectionDialog({
       wslUser,
       dockerContainer,
       manualDockerContainer,
+      serverUrl,
+      serverToken,
+      serverName,
     });
     if (!nextTarget) {
       // 必填项缺失属于表单校验，不应该和真实连接失败共用 destructive 错误样式。
@@ -351,13 +462,22 @@ export function RemoteConnectionDialog({
   }, [handleConnect, pendingRemoteTarget, startRemoteConnection]);
 
   const handleBackToConnection = useCallback(async () => {
-    if (!connectedSessionId) {
+    // 返回时废弃正在进行的代数并释放 session
+    bumpRemoteConnectionGeneration(generationStateRef.current);
+    loadingRef.current = false;
+    isSessionBoundRef.current = false;
+    connectingRequestIdRef.current = null;
+
+    const sessionId = connectedSessionIdRef.current ?? connectedSessionId;
+    connectedSessionIdRef.current = null;
+
+    if (!sessionId) {
       return;
     }
 
     resetFeedback();
     try {
-      await onCancelSession(connectedSessionId);
+      await onCancelSession(sessionId);
       setConnectedSessionId(null);
       updateConnectingRequestId(null);
       resetConnectionLogs();
@@ -380,6 +500,9 @@ export function RemoteConnectionDialog({
       resetFeedback();
       try {
         await onSelectProject(connectedSessionId, path, localWorkspacePath);
+        // 成功选目录后会话所有权转移给工作区；同步标记已绑定并清空弹窗持有引用，防止卸载时误释放工作区会话
+        isSessionBoundRef.current = true;
+        connectedSessionIdRef.current = null;
         resetConnectionLogs();
         setCurrentStep("kind");
         setConnectedSessionId(null);
@@ -395,6 +518,7 @@ export function RemoteConnectionDialog({
           ),
         });
         if (!failureState.connectedSessionId) {
+          connectedSessionIdRef.current = null;
           setConnectedSessionId(null);
           setCurrentStep(failureState.step);
           updateConnectingRequestId(null);
@@ -416,6 +540,9 @@ export function RemoteConnectionDialog({
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
       if (shouldResetRemoteConnectionOnOpen(flowSnapshot)) {
+        // 重新打开并重置向导时废弃旧 generation，防止后台过期请求打断重置
+        bumpRemoteConnectionGeneration(generationStateRef.current);
+        loadingRef.current = false;
         resetFeedback();
         resetConnectionLogs();
         setCurrentStep("kind");
@@ -439,6 +566,8 @@ export function RemoteConnectionDialog({
           size={triggerSize}
           onClick={() => {
             if (shouldResetRemoteConnectionOnOpen(flowSnapshot)) {
+              bumpRemoteConnectionGeneration(generationStateRef.current);
+              loadingRef.current = false;
               resetFeedback();
               resetConnectionLogs();
               setCurrentStep("kind");
@@ -526,6 +655,9 @@ export function RemoteConnectionDialog({
                     wslDistros={wslDistros}
                     dockerContainer={dockerContainer}
                     manualDockerContainer={manualDockerContainer}
+                    serverUrl={serverUrl}
+                    serverToken={serverToken}
+                    serverName={serverName}
                     dockerContainers={dockerContainers}
                     dockerAvailable={dockerAvailable}
                     sshConfigAliases={sshConfigAliases}
@@ -553,6 +685,9 @@ export function RemoteConnectionDialog({
                     onWslUserChange={setWslUser}
                     onDockerContainerChange={setDockerContainer}
                     onManualDockerContainerChange={setManualDockerContainer}
+                    onServerUrlChange={setServerUrl}
+                    onServerTokenChange={setServerToken}
+                    onServerNameChange={setServerName}
                     onDockerContainersRefresh={refreshDockerContainers}
                     onApplySshConfigAlias={applySshConfigAlias}
                     onClearSelectedSshConfigAlias={clearSelectedSshConfigAlias}
@@ -574,6 +709,11 @@ export function RemoteConnectionDialog({
                         if (!confirmed) {
                           return;
                         }
+
+                        // 返回时使活动 generation 失效，避免返回设置页后陈旧请求完成覆盖设置页步骤
+                        bumpRemoteConnectionGeneration(generationStateRef.current);
+                        loadingRef.current = false;
+                        connectingRequestIdRef.current = null;
 
                         if (loading) {
                           await cancelPendingRemoteConnection(connectingRequestId ?? undefined);

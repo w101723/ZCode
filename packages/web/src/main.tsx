@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- Web 入口集中编排启动、路由与 workspace shell wiring，与 Root.tsx 同样先保持入口收口，避免跨层状态拆散。 */
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AppErrorBoundary,
@@ -7,6 +8,8 @@ import {
   generateMobileDeviceFingerprint,
   playTaskNotificationSound,
   setStreamClientId,
+  registerRemoteWorkspaceSession,
+  unregisterRemoteWorkspaceSession,
   type Theme,
 } from "@zcode/ui";
 import "@zcode/ui/styles.css";
@@ -28,8 +31,16 @@ import {
   isConversationSharePath,
   resolveConversationShareCodeFromPath,
 } from "./share/conversationShareRoute.js";
-import type { IPlatformService, RemoteTarget, ServerRemoteInfo } from "@zcode/shared";
+import {
+  createUuid,
+  stripRemoteTargetSecrets,
+  type IPlatformService,
+  type RemoteTarget,
+  type RemoteSessionClosedEvent,
+  type ServerRemoteInfo,
+} from "@zcode/shared";
 import { WEB_DEFAULT_THEME, resolveWebInitialTheme } from "./webThemeSeed.js";
+import { requestWebServerConnection } from "./serverRemoteConnection.js";
 
 function resolveWebThemePreference(defaultTheme: Theme = WEB_DEFAULT_THEME): Theme {
   const saved = localStorage.getItem("zcode-theme");
@@ -80,6 +91,7 @@ const webAuthService = createWebAuthService();
 
 interface WebBootstrapResult {
   wsUrl: string;
+  externalServerUrl?: string;
   initialWorkspaceAbsPath?: string;
   initialWorkspaceIdentity?: string;
   initialTaskId?: string;
@@ -188,7 +200,11 @@ async function renderConversationSharePage(): Promise<void> {
 }
 
 function createWebPlatform(): IPlatformService {
+  const sessions = new Map<string, { close: () => void }>();
+  const closedListeners = new Set<(event: RemoteSessionClosedEvent) => void>();
+  const pending = new Map<string, AbortController>();
   return {
+    remoteConnectionKinds: ["server"],
     canSelectFilePath: false,
     // Web 端无法打开系统目录选择框
     selectDirectory: () => Promise.resolve(null),
@@ -199,20 +215,79 @@ function createWebPlatform(): IPlatformService {
     createTempTextAttachment: () =>
       Promise.reject(new Error("Temporary text attachments require a desktop host")),
     onRemoteConnectionLog: () => () => {},
-    onRemoteSessionClosed: () => () => {},
+    onRemoteSessionClosed: (handler) => {
+      closedListeners.add(handler);
+      return () => {
+        closedListeners.delete(handler);
+      };
+    },
     // Web 端无多窗口管理
     activateOrSetWorkspace: () => Promise.resolve({ activated: false }),
-    // TODO(web-remote-workspace): 普通 Web 模式先只保证 server 本地工作区可用。
-    // 远程 WebSocket 只暴露部分 service，与 Root/RemoteServiceAccess 需要的完整
-    // accessor 不匹配，直接打开 ?remote=<id> 会在项目向导或首屏卡住。
-    connectRemote(options: RemoteTarget) {
-      return Promise.resolve({
-        success: false,
-        error: `Remote connect is not supported in Web mode yet: ${options.kind}`,
-      });
+    async connectRemote(options: RemoteTarget, requestId?: string) {
+      if (options.kind !== "server") {
+        return {
+          success: false,
+          error: `Web only supports direct Server targets: ${options.kind}`,
+        };
+      }
+      const id = requestId || createUuid();
+      if (pending.has(id)) return { success: false, error: "Duplicate connection request" };
+      const controller = new AbortController();
+      pending.set(id, controller);
+      let socket: WebSocket | undefined;
+      try {
+        const { wsUrl, info } = await requestWebServerConnection(
+          options.serverUrl,
+          options.token || "",
+          fetch,
+          controller.signal,
+          options.serverId,
+        );
+        if (controller.signal.aborted) return { success: false, error: "Connection cancelled" };
+        const sessionId = createUuid();
+        const services = await connectViaWebSocket(wsUrl, {
+          signal: controller.signal,
+          onOpenSocket: (openedSocket) => {
+            socket = openedSocket;
+          },
+          onClose: (event) => {
+            if (!sessions.has(sessionId)) return;
+            sessions.delete(sessionId);
+            unregisterRemoteWorkspaceSession(sessionId);
+            for (const listener of closedListeners)
+              listener({ sessionId, reason: "host-exit", exitCode: event.code, signal: null });
+          },
+        });
+        if (controller.signal.aborted) {
+          socket?.close();
+          return { success: false, error: "Connection cancelled" };
+        }
+        sessions.set(sessionId, { close: () => socket?.close() });
+        registerRemoteWorkspaceSession({
+          sessionId,
+          services,
+          target: stripRemoteTargetSecrets({ ...options, serverId: info.serverId }),
+          dispose: () => socket?.close(),
+        });
+        return { success: true, sessionId };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      } finally {
+        pending.delete(id);
+      }
     },
-    cancelPendingRemoteConnection: (_requestId?: string) => Promise.resolve(),
-    disposeRemoteSession: () => Promise.resolve(),
+    cancelPendingRemoteConnection: (requestId?: string) => {
+      if (requestId) pending.get(requestId)?.abort();
+      else for (const controller of pending.values()) controller.abort();
+      return Promise.resolve();
+    },
+    disposeRemoteSession: (sessionId) => {
+      const entry = sessions.get(sessionId);
+      sessions.delete(sessionId);
+      unregisterRemoteWorkspaceSession(sessionId);
+      entry?.close();
+      return Promise.resolve();
+    },
     isDockerAvailable: () => Promise.resolve(false),
     listWSLDistros: () => Promise.resolve([]),
     listDockerContainers: () => Promise.resolve([]),
@@ -357,6 +432,19 @@ function resolveDefaultWsOrigin(): string {
 
 async function resolveWebBootstrap(): Promise<WebBootstrapResult> {
   const params = new URLSearchParams(window.location.search);
+  if (params.has("token")) {
+    params.delete("token");
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`,
+    );
+    throw new Error("Server credentials cannot be provided in a URL");
+  }
+  const externalServerUrl = params.get("server") || params.get("serverUrl");
+  if (externalServerUrl) {
+    return { wsUrl: "", externalServerUrl };
+  }
   const remoteId = params.get("remote");
   const wsUrl = remoteId
     ? `${resolveDefaultWsOrigin()}/ws/remote/${remoteId}`
@@ -385,6 +473,67 @@ async function resolveWebBootstrap(): Promise<WebBootstrapResult> {
   } catch {
     return { wsUrl };
   }
+}
+
+function WebRemoteServerLogin({ serverUrl }: { serverUrl: string }) {
+  const [token, setToken] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-background p-4 text-foreground">
+      <form
+        className="flex w-full max-w-md flex-col gap-3 rounded-xl border border-card-border bg-card p-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (busy) return;
+          setBusy(true);
+          setError("");
+          void requestWebServerConnection(serverUrl, token)
+            .then(({ info, wsUrl }) => {
+              setToken("");
+              const workspace = info.workspaces[0];
+              return mountWebApp({
+                wsUrl,
+                ...(workspace ? { initialWorkspaceAbsPath: workspace.path } : {}),
+                ...(workspace?.workspaceIdentity
+                  ? { initialWorkspaceIdentity: workspace.workspaceIdentity }
+                  : {}),
+              });
+            })
+            .catch((reason: unknown) => {
+              setError(reason instanceof Error ? reason.message : String(reason));
+              setBusy(false);
+            });
+        }}
+      >
+        <h1 className="text-ui-base font-semibold">Connect to ZCode Server</h1>
+        <p className="break-all text-ui-xs text-foreground-subtle">{serverUrl}</p>
+        <label htmlFor="server-token" className="text-ui-xs">
+          Server token
+        </label>
+        <input
+          id="server-token"
+          type="password"
+          autoComplete="off"
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+          className="rounded-lg border border-border bg-surface px-3 py-2 text-ui-base"
+        />
+        {error ? (
+          <p role="alert" className="text-ui-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-lg bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50"
+        >
+          {busy ? "Connecting…" : "Connect"}
+        </button>
+      </form>
+    </main>
+  );
 }
 
 function WebBootstrapErrorScreen({ message }: { message: string }) {
@@ -441,6 +590,18 @@ async function bootstrapWebApp() {
     return;
   }
 
+  if (bootstrap.externalServerUrl) {
+    root.render(<WebRemoteServerLogin serverUrl={bootstrap.externalServerUrl} />);
+    return;
+  }
+  try {
+    await mountWebApp(bootstrap);
+  } catch (error) {
+    renderWebBootstrapError(error);
+  }
+}
+
+async function mountWebApp(bootstrap: WebBootstrapResult): Promise<void> {
   try {
     const services = await connectViaWebSocket(bootstrap.wsUrl, {
       onClose: () => {},
@@ -464,7 +625,8 @@ async function bootstrapWebApp() {
             allowOpenWorkspace={bootstrap.allowOpenWorkspace}
             preferDirectoryBrowser
             supportsEmbeddedBrowser={false}
-            allowRemoteWorkspace={false}
+            allowRemoteWorkspace
+            remoteConnectionKinds={["server"]}
           />
         </ZCodeIntlProvider>
       </AppErrorBoundary>,

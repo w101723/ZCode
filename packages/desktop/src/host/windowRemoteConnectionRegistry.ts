@@ -1,8 +1,10 @@
 /* eslint-disable max-lines -- 所有 transport 生命周期共享同一个 registry 状态机，必须原子演进。 */
 import {
+  buildRemoteWorkspaceIdentity,
   buildSshRemoteHostKey,
   stripRemoteTargetSecrets,
   type RemoteTarget,
+  type ServerRemoteInfo,
   type WindowHostAttachmentScope,
   type WindowHostRemoteWorkspaceDescriptor,
 } from "@zcode/shared";
@@ -23,6 +25,7 @@ export interface WindowRemoteConnectionCloseEvent {
 export interface WindowRemoteConnectionHandle<TServices, TCapabilities = never> {
   services: TServices;
   capabilities?: TCapabilities;
+  serverInfo?: ServerRemoteInfo;
   dispose(): void | Promise<void>;
   onDidClose?(listener: (event: WindowRemoteConnectionCloseEvent) => void): { dispose(): void };
 }
@@ -122,6 +125,8 @@ function buildConnectionKey(target: RemoteTarget, remoteSessionId: string): stri
     case "docker":
       // Docker 保持现有 dedicated logical session 生命周期，不按 target 复用。
       return `${target.kind}:dedicated:${remoteSessionId}`;
+    case "server":
+      return `server:${target.serverUrl.trim()}`;
   }
 }
 
@@ -156,6 +161,12 @@ export function createWindowRemoteConnectionRegistry<TServices, TCapabilities = 
   let disposed = false;
   let disposePromise: Promise<void> | null = null;
   const wslIdleTtlMs = options.wslIdleTtlMs ?? 60_000;
+
+  function removeEntryKeys(entry: ConnectionEntry<TServices, TCapabilities>): void {
+    for (const [key, candidate] of entriesByKey) {
+      if (candidate === entry) entriesByKey.delete(key);
+    }
+  }
 
   function clearIdleTimer(entry: ConnectionEntry<TServices, TCapabilities>): void {
     if (!entry.idleTimer) {
@@ -354,9 +365,7 @@ export function createWindowRemoteConnectionRegistry<TServices, TCapabilities = 
     entry.abortController.abort();
     entry.closeSubscription?.dispose();
     entry.closeSubscription = undefined;
-    if (entriesByKey.get(entry.key) === entry) {
-      entriesByKey.delete(entry.key);
-    }
+    removeEntryKeys(entry);
     entry.disposePromise = Promise.resolve(entry.handle?.dispose()).then(() => undefined);
     return entry.disposePromise;
   }
@@ -370,9 +379,7 @@ export function createWindowRemoteConnectionRegistry<TServices, TCapabilities = 
     }
     entry.state = "disconnected";
     clearIdleTimer(entry);
-    if (entriesByKey.get(entry.key) === entry) {
-      entriesByKey.delete(entry.key);
-    }
+    removeEntryKeys(entry);
     for (const remoteSessionId of entry.sessions) {
       const session = sessionsById.get(remoteSessionId);
       if (!session) {
@@ -411,6 +418,16 @@ export function createWindowRemoteConnectionRegistry<TServices, TCapabilities = 
       })
       .then(async (handle) => {
         entry.handle = handle;
+        if (entry.target.kind === "server") {
+          if (!handle.serverInfo?.serverId) {
+            await handle.dispose();
+            throw new Error("Server 连接缺少已校验的 serverId");
+          }
+          entry.target = stripRemoteTargetSecrets({
+            ...entry.target,
+            serverId: handle.serverInfo.serverId,
+          });
+        }
         if (entry.disposed || entry.sessions.size === 0) {
           // 底层 SSH/WSL connector 可能无法中断认证或部署。
           // 最后一个 logical owner 取消后，迟到的成功结果必须立即释放，不能复活旧连接。
@@ -484,6 +501,9 @@ export function createWindowRemoteConnectionRegistry<TServices, TCapabilities = 
     if (pendingSessionsByRequestId.has(params.requestId)) {
       throw new Error(`远程连接 requestId 重复，requestId=${params.requestId}`);
     }
+    if (params.target.kind === "server" && !params.target.serverId && params.workspaceIdentity) {
+      throw new Error("Server 连接尚未校验身份，不能预先指定 workspaceIdentity");
+    }
 
     const remoteSessionId = options.createId();
     const key = buildConnectionKey(params.target, remoteSessionId);
@@ -523,6 +543,26 @@ export function createWindowRemoteConnectionRegistry<TServices, TCapabilities = 
 
     try {
       await Promise.race([entry.ready, cancellation]);
+      if (session.target.kind === "server" && entry.target.kind === "server") {
+        if (session.cancelled || sessionsById.get(remoteSessionId) !== session) {
+          throw new WindowRemoteConnectCancelledError();
+        }
+        if (session.target.serverId && session.target.serverId !== entry.target.serverId) {
+          throw new Error("Server ID 与当前连接不匹配");
+        }
+        session.target = stripRemoteTargetSecrets({
+          ...session.target,
+          ...(entry.target.serverId ? { serverId: entry.target.serverId } : {}),
+        });
+        if (!session.workspaceIdentity) {
+          session.workspaceIdentity = buildRemoteWorkspaceIdentity(
+            session.workspacePath ?? "/",
+            session.target,
+          );
+          session.workspaceKey = session.workspaceIdentity;
+          entry.workspaceKeys.add(session.workspaceKey);
+        }
+      }
       await Promise.race([prepareWorkspaceRuntime(session), cancellation]);
       if (session.cancelled || !sessionsById.has(remoteSessionId)) {
         throw new WindowRemoteConnectCancelledError();
@@ -531,7 +571,7 @@ export function createWindowRemoteConnectionRegistry<TServices, TCapabilities = 
       session.sourceAvailability = "online";
       return {
         remoteSessionId,
-        target: stripRemoteTargetSecrets(params.target),
+        target: stripRemoteTargetSecrets(session.target),
         ...(session.workspacePath ? { workspacePath: session.workspacePath } : {}),
         ...(session.workspaceIdentity ? { workspaceIdentity: session.workspaceIdentity } : {}),
         generation: session.generation,

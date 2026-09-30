@@ -18,6 +18,7 @@ export interface WebSocketConnectionCloseEvent {
 interface WebSocketConnectionOptions {
   onClose?: (event: WebSocketConnectionCloseEvent) => void;
   onOpenSocket?: (socket: WebSocket) => void;
+  signal?: AbortSignal;
 }
 
 function wrapBrowserWebSocket(ws: WebSocket): ISocket {
@@ -64,15 +65,33 @@ export function connectViaWebSocket(
   options?: WebSocketConnectionOptions,
 ): Promise<IServiceAccessor> {
   return new Promise((resolve, reject) => {
+    if (options?.signal?.aborted) {
+      reject(new Error("WebSocket connection cancelled"));
+      return;
+    }
     const ws = new WebSocket(wsUrl);
     let settled = false;
-
+    const onAbort = () => {
+      ws.close();
+      if (!settled) {
+        settled = true;
+        reject(new Error("WebSocket connection cancelled"));
+      }
+    };
+    options?.signal?.addEventListener("abort", onAbort, { once: true });
     ws.addEventListener("error", () => {
       if (!settled) {
-        reject(new Error(`WebSocket connection failed: ${wsUrl}`));
+        settled = true;
+        // 一次性连接票据位于握手 URL，错误对象也可能进入 UI 日志，不能原样带出查询串。
+        reject(
+          new Error(
+            `WebSocket connection failed: ${new URL(wsUrl).origin}${new URL(wsUrl).pathname}`,
+          ),
+        );
       }
     });
     ws.addEventListener("close", (event) => {
+      options?.signal?.removeEventListener("abort", onAbort);
       options?.onClose?.({
         code: event.code,
         reason: event.reason,
@@ -80,6 +99,7 @@ export function connectViaWebSocket(
       });
 
       if (!settled) {
+        settled = true;
         reject(
           new Error(
             event.reason
@@ -91,7 +111,12 @@ export function connectViaWebSocket(
     });
 
     ws.addEventListener("open", () => {
+      if (options?.signal?.aborted) {
+        ws.close();
+        return;
+      }
       settled = true;
+      options?.signal?.removeEventListener("abort", onAbort);
       options?.onOpenSocket?.(ws);
       const socket = wrapBrowserWebSocket(ws);
       resolve(connectViaProtocol(new SocketProtocol(socket)));

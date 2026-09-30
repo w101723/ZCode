@@ -25,7 +25,20 @@ export interface DockerConnectOptions {
   container: string;
 }
 
-export type RemoteTarget = SSHConnectOptions | WSLConnectOptions | DockerConnectOptions;
+export interface ServerConnectOptions {
+  kind: "server";
+  serverUrl: string;
+  name?: string;
+  token?: string;
+  serverId?: string;
+  tokenCredentialKey?: string;
+}
+
+export type RemoteTarget =
+  | SSHConnectOptions
+  | WSLConnectOptions
+  | DockerConnectOptions
+  | ServerConnectOptions;
 
 /** 删除只应存在于当前连接流程中的 secret，供长期内存状态和跨进程回包使用。 */
 export function stripRemoteTargetSecrets(target: RemoteTarget): RemoteTarget {
@@ -35,6 +48,11 @@ export function stripRemoteTargetSecrets(target: RemoteTarget): RemoteTarget {
       privateKeyPassphrase: _privateKeyPassphrase,
       ...sanitized
     } = target;
+    return sanitized;
+  }
+
+  if (target.kind === "server") {
+    const { token: _token, ...sanitized } = target;
     return sanitized;
   }
 

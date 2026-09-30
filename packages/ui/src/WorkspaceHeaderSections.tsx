@@ -93,6 +93,8 @@ export function WorkspaceHeaderTitleSection({
   nativeSessionLogPath: _nativeSessionLogPath,
   nativeSessionLogExists: _nativeSessionLogExists,
   nativeSessionLogLoading: _nativeSessionLogLoading,
+  onReloadSession,
+  reloadSessionDisabled,
   reloadSessionPending,
   workspaceHeaderState,
   onRefreshGit: _onRefreshGit,
@@ -518,6 +520,25 @@ export function WorkspaceHeaderTitleSection({
                   <DropdownMenuSeparator />
                 </>
               ) : null}
+              {onReloadSession && !simplifyForNarrowRemote ? (
+                <>
+                  <DropdownMenuItem
+                    disabled={
+                      Boolean(readOnlyReason) || reloadSessionDisabled || reloadSessionPending
+                    }
+                    title={readOnlyReason}
+                    onSelect={() => {
+                      void onReloadSession({
+                        resumeTaskId: activeTaskId,
+                        provider: menuTaskProvider,
+                      });
+                    }}
+                  >
+                    {intl.formatMessage({ id: "appHeader.reloadSession" })}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
               <TaskActionMenuContent
                 intl={intl}
                 isPinned={isPinned}
@@ -529,7 +550,9 @@ export function WorkspaceHeaderTitleSection({
                 disableTaskActions={Boolean(readOnlyReason)}
                 disabledReason={readOnlyReason}
                 disablePinTaskAction={taskMenuMembershipLoading}
-                hideMobileUnsupportedActions={simplifyForNarrowRemote}
+                hideMobileUnsupportedActions={
+                  simplifyForNarrowRemote || Boolean(remoteTarget && remoteTarget.kind !== "wsl")
+                }
                 Item={DropdownMenuItem}
                 Separator={DropdownMenuSeparator}
                 onTogglePinTask={() => {

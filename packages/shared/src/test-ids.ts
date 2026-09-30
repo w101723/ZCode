@@ -157,6 +157,12 @@ export const TID_REMOTE_KIND_SSH = "remote-kind-ssh";
 export const TID_REMOTE_KIND_WSL = "remote-kind-wsl";
 /** 远程连接方式切换到 Docker */
 export const TID_REMOTE_KIND_DOCKER = "remote-kind-docker";
+/** 远程连接方式切换到 Server */
+export const TID_REMOTE_KIND_SERVER = "remote-kind-server";
+/** Server URL 输入框 */
+export const TID_SERVER_URL_INPUT = "server-url-input";
+/** Server Token 输入框 */
+export const TID_SERVER_TOKEN_INPUT = "server-token-input";
 /** SSH 主机地址输入框 */
 export const TID_SSH_HOST_INPUT = "ssh-host-input";
 /** SSH 端口号输入框 */

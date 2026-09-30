@@ -2,6 +2,7 @@
 import type {
   DockerConnectOptions,
   RemoteTarget,
+  ServerConnectOptions,
   SSHConnectOptions,
   WSLConnectOptions,
 } from "./remoteTarget.js";
@@ -228,7 +229,8 @@ export interface ApplicationIconRequest {
 export type OpenInEditorRemoteTarget =
   | Pick<SSHConnectOptions, "kind" | "host" | "port" | "username" | "sshConfigAlias">
   | Pick<WSLConnectOptions, "kind" | "distro" | "user">
-  | Pick<DockerConnectOptions, "kind" | "container">;
+  | Pick<DockerConnectOptions, "kind" | "container">
+  | Pick<ServerConnectOptions, "kind" | "serverUrl" | "name" | "serverId">;
 
 export interface OpenInEditorOptions {
   remoteTarget?: OpenInEditorRemoteTarget;
@@ -299,6 +301,13 @@ export function createOpenInEditorRemoteTarget(target: RemoteTarget): OpenInEdit
       return {
         kind: "docker",
         container: target.container,
+      };
+    case "server":
+      return {
+        kind: "server",
+        serverUrl: target.serverUrl,
+        ...(target.name ? { name: target.name } : {}),
+        ...(target.serverId ? { serverId: target.serverId } : {}),
       };
   }
 }
@@ -520,6 +529,7 @@ export type CuaOsSupport =
  * 业务服务（文件、终端、凭据等）走 IServiceAccessor 的 RPC 通道。
  */
 export interface IPlatformService {
+  remoteConnectionKinds?: readonly RemoteTarget["kind"][];
   /** 当前平台的文件选择框是否能返回 agent 可访问的本地绝对路径 */
   canSelectFilePath?: boolean;
 

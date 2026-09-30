@@ -16,7 +16,10 @@ import {
 type RemoteKind = RemoteTarget["kind"];
 export type SSHAuthMethod = "password" | "privateKey";
 
-function buildAvailableKinds(options: { isWindowsDesktop: boolean }): RemoteKind[] {
+export function buildAvailableKinds(options: {
+  isWindowsDesktop: boolean;
+  supportedKinds?: readonly RemoteKind[];
+}): RemoteKind[] {
   const kinds: RemoteKind[] = ["ssh"];
   // 远程连接入口里 WSL 和 SSH 同属主机类连接。
   // Windows 下先放 WSL 再放 Docker，避免 WSL 被 Docker 隔开后在选择页显得离 SSH 很远。
@@ -26,23 +29,28 @@ function buildAvailableKinds(options: { isWindowsDesktop: boolean }): RemoteKind
   // Docker入口之前完全依赖预探测结果决定是否展示。
   // 当探测能力暂时不可用、或用户还没切到 Docker 时，入口会直接消失，
   // 用户甚至不知道这里支持 Docker 连接。改为始终展示入口，切换后再懒加载探测结果。
-  kinds.push("docker");
-  return kinds;
+  kinds.push("docker", "server");
+  return options.supportedKinds
+    ? kinds.filter((kind) => options.supportedKinds?.includes(kind))
+    : kinds;
 }
 
 export function useRemoteConnectionForm({
   open,
   isWindowsDesktop,
   preferredKind,
+  supportedKinds,
   preferredWslDistro,
 }: {
   open: boolean;
   isWindowsDesktop: boolean;
   preferredKind?: RemoteKind;
+  supportedKinds?: readonly RemoteKind[];
   preferredWslDistro?: string;
 }) {
   const platform = usePlatform();
-  const [kind, setKind] = useState<RemoteKind>("ssh");
+  const allowedKinds = platform.remoteConnectionKinds ?? supportedKinds;
+  const [kind, setKindState] = useState<RemoteKind>(allowedKinds?.[0] ?? "ssh");
   const [host, setHostState] = useState("");
   const [port, setPortState] = useState("22");
   const [username, setUsernameState] = useState("");
@@ -57,6 +65,9 @@ export function useRemoteConnectionForm({
   const [wslUser, setWslUser] = useState("");
   const [dockerContainer, setDockerContainer] = useState("");
   const [manualDockerContainer, setManualDockerContainer] = useState("");
+  const [serverUrl, setServerUrl] = useState("");
+  const [serverToken, setServerToken] = useState("");
+  const [serverName, setServerName] = useState("");
   const [sshConfigAliases, setSshConfigAliases] = useState<SSHConfigAliasOption[]>([]);
   const [sshConfigAliasesLoading, setSshConfigAliasesLoading] = useState(false);
   const [sshConfigAliasesLoaded, setSshConfigAliasesLoaded] = useState(false);
@@ -75,16 +86,19 @@ export function useRemoteConnectionForm({
   const dockerOptionsActiveLoadIdRef = useRef(0);
   const dockerOptionsInFlightLoadIdRef = useRef<number | null>(null);
   const availableKinds = useMemo(
-    () => buildAvailableKinds({ isWindowsDesktop }),
-    [isWindowsDesktop],
+    () => buildAvailableKinds({ isWindowsDesktop, supportedKinds: allowedKinds }),
+    [isWindowsDesktop, allowedKinds],
   );
+  const setKind = (value: RemoteKind) => {
+    if (availableKinds.includes(value)) setKindState(value);
+  };
 
   useEffect(() => {
     if (availableKinds.includes(kind)) {
       return;
     }
 
-    setKind(availableKinds[0] ?? "ssh");
+    setKindState(availableKinds[0] ?? "ssh");
   }, [availableKinds, kind]);
 
   useEffect(() => {
@@ -110,7 +124,7 @@ export function useRemoteConnectionForm({
     setDockerOptionsError("");
     setDockerContainers([]);
     if (preferredKind && availableKinds.includes(preferredKind)) {
-      setKind(preferredKind);
+      setKindState(preferredKind);
     }
     if (preferredWslDistro !== undefined) {
       setWslDistro(preferredWslDistro);
@@ -338,6 +352,9 @@ export function useRemoteConnectionForm({
     wslUser,
     dockerContainer,
     manualDockerContainer,
+    serverUrl,
+    serverToken,
+    serverName,
     sshConfigAliases,
     sshConfigAliasesLoading,
     sshConfigAliasesError,
@@ -359,6 +376,9 @@ export function useRemoteConnectionForm({
     setWslUser,
     setDockerContainer,
     setManualDockerContainer,
+    setServerUrl,
+    setServerToken,
+    setServerName,
     // Docker 容器列表是运行态数据，之前只在进入 Docker 页时拉一次。
     // 下拉每次打开都通过这个回调按需刷新，避免用户看到已过期的容器列表。
     refreshDockerContainers: () => refreshDockerContainers({ clearContainersOnError: false }),

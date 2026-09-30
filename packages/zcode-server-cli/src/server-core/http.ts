@@ -25,7 +25,13 @@ import {
   ZCODE_VERSION,
   type ServerRemoteInfo,
 } from "@zcode/shared";
-import { createHostCapabilityStore, type HostCapabilityStore } from "./hostCapability.js";
+import {
+  createHostCapabilityStore,
+  createWebTicketStore,
+  type HostCapabilityStore,
+  type WebTicketStore,
+} from "./hostCapability.js";
+import type { Context } from "hono";
 
 interface CoreHttpServer {
   host: string;
@@ -54,8 +60,52 @@ async function closeWebSocketServer(wss: WebSocketServer): Promise<void> {
 }
 
 function isLoopbackHost(host: string): boolean {
-  const normalized = host.trim().toLowerCase();
+  const normalized = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+function parseAllowedOrigins(value: string | undefined | string[]): string[] {
+  if (!value) return [];
+  const entries = Array.isArray(value) ? value : value.split(",");
+  return entries
+    .map((origin) => origin.trim().replace(/\/+$/, ""))
+    .filter((origin) => origin.length > 0 && origin !== "*");
+}
+
+function normalizeOrigin(origin: string): string {
+  return origin.trim().replace(/\/+$/, "");
+}
+
+function isOriginAllowed(origin: string | undefined, allowedOrigins: string[]): boolean {
+  if (!origin) return false;
+  const normalized = normalizeOrigin(origin);
+  return allowedOrigins.includes(normalized);
+}
+
+function extractBearerToken(authHeader: string | undefined): string | undefined {
+  if (!authHeader) return undefined;
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1]?.trim() : undefined;
+}
+
+function isCrossOriginRequest(c: Context): boolean {
+  const origin = c.req.header("origin");
+  if (!origin) {
+    return false;
+  }
+  try {
+    const originUrl = new URL(origin);
+    const hostHeader = c.req.header("host") || new URL(c.req.url).host;
+    if (!hostHeader) {
+      return true;
+    }
+    return originUrl.host.toLowerCase() !== hostHeader.toLowerCase();
+  } catch {
+    return true;
+  }
 }
 
 function wrapWebSocket(ws: WebSocket): ISocket {
@@ -118,23 +168,38 @@ export async function createCoreHttpServer(
     host?: string;
     port?: number;
     serverId?: string;
+    authToken?: string;
+    allowedWebOrigins?: string[];
     hostCapabilityStore?: HostCapabilityStore;
+    webTicketStore?: WebTicketStore;
   } = {},
 ): Promise<CoreHttpServer> {
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
   const host = options.host ?? "127.0.0.1";
   if (!isLoopbackHost(host)) {
-    // 当前只有本机/SSH 隧道入口，Core 尚未接入 token middleware；对外监听必须 fail-closed。
+    // 当前只有本机/SSH 隧道入口，对外监听必须 fail-closed
     throw new Error(
       `Non-loopback host ${host} requires authentication before the server can listen`,
     );
   }
+
+  const authToken =
+    options.authToken?.trim() ||
+    process.env["ZCODE_SERVER_AUTH_TOKEN"]?.trim() ||
+    process.env["ZCODE_SERVER_TOKEN"]?.trim();
+  const allowedOrigins = Array.from(
+    new Set([
+      ...parseAllowedOrigins(options.allowedWebOrigins),
+      ...parseAllowedOrigins(process.env["ZCODE_SERVER_ALLOWED_WEB_ORIGINS"]),
+    ]),
+  );
+
   const info: ServerRemoteInfo = {
     serverId: options.serverId ?? hostname() ?? "zcode-server",
     version: ZCODE_VERSION,
     protocolVersion: SERVER_REMOTE_PROTOCOL_VERSION,
-    authRequired: false,
+    authRequired: Boolean(authToken),
     workspaces: [],
     capabilities: {
       desktopContinuous: true,
@@ -142,10 +207,120 @@ export async function createCoreHttpServer(
       processResourceTelemetry: true,
     },
   };
-  // 裸 Set 无法落实 expiresAt，未消费的 capability 会一直有效并持续累积。
-  // 使用与 packages/server 兼容的 TTL 一次性 store，使有效期和消费语义与返回信息一致。
+
   const capabilities = options.hostCapabilityStore ?? createHostCapabilityStore();
+  const webTickets = options.webTicketStore ?? createWebTicketStore();
+
+  // 1. CORS 与预检中间件
+  app.use("*", async (c, next) => {
+    const origin = c.req.header("origin");
+    if (origin && isOriginAllowed(origin, allowedOrigins)) {
+      c.header("Access-Control-Allow-Origin", normalizeOrigin(origin));
+      c.header("Vary", "Origin");
+    }
+    if (c.req.method === "OPTIONS") {
+      if (!origin || !isOriginAllowed(origin, allowedOrigins)) {
+        return c.json({ error: "Origin not allowed" }, 403);
+      }
+      c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      c.header(
+        "Access-Control-Allow-Headers",
+        "Authorization, Content-Type, Origin, x-zcode-rpc-host-capability",
+      );
+      c.header("Access-Control-Max-Age", "86400");
+      return c.body(null, 204);
+    }
+    await next();
+  });
+
+  // 2. GET /api/server-info 公开元数据
   app.get("/api/server-info", (context) => context.json(info));
+
+  // 3. POST /api/rpc-web-ticket
+  app.post("/api/rpc-web-ticket", (context) => {
+    const origin = context.req.header("origin");
+    if (!origin) {
+      return context.json({ error: "Origin header is required" }, 400);
+    }
+    if (!isOriginAllowed(origin, allowedOrigins)) {
+      return context.json({ error: "Origin not allowed" }, 403);
+    }
+    if (authToken) {
+      const bearerToken = extractBearerToken(context.req.header("authorization"));
+      if (!bearerToken || bearerToken !== authToken) {
+        return context.json({ error: "Unauthorized" }, 401);
+      }
+    } else {
+      return context.json({ error: "Server authentication is not configured" }, 403);
+    }
+    const ticketData = webTickets.issue(normalizeOrigin(origin));
+    return context.json(ticketData);
+  });
+
+  // 4. POST /api/rpc-host-capability 专供桌面 Node Host 申请
+  app.post("/api/rpc-host-capability", (context) => {
+    const origin = context.req.header("origin");
+    if (origin) {
+      return context.json(
+        { error: "Browser origins are not permitted to request host capability" },
+        403,
+      );
+    }
+    if (authToken) {
+      const bearerToken = extractBearerToken(context.req.header("authorization"));
+      if (!bearerToken || bearerToken !== authToken) {
+        return context.json({ error: "Unauthorized" }, 401);
+      }
+    }
+    return context.json(capabilities.issue());
+  });
+
+  // 5. /ws
+  app.use("/ws", async (context, next) => {
+    const origin = context.req.header("origin");
+    const url = new URL(context.req.url);
+    const ticketParam = url.searchParams.get("ticket");
+    const tokenParam = url.searchParams.get("token");
+
+    const isCross = isCrossOriginRequest(context);
+    if (tokenParam) {
+      // 长期 Token 不能落入 WebSocket URL；缺失 Origin 的请求也不得消费绑定的票据。
+      return context.json({ error: "Long-term tokens are not permitted in WebSocket URLs" }, 401);
+    }
+    if (ticketParam && !origin) {
+      return context.json({ error: "Origin is required for a WebSocket ticket" }, 401);
+    }
+    if (isCross) {
+      if (!isOriginAllowed(origin, allowedOrigins)) {
+        return context.json({ error: "Origin not allowed" }, 403);
+      }
+      if (!ticketParam) {
+        return context.json(
+          { error: "Ticket is required for cross-origin WebSocket connection" },
+          401,
+        );
+      }
+      if (!webTickets.consume(ticketParam, normalizeOrigin(origin!))) {
+        return context.json({ error: "Invalid or expired ticket" }, 401);
+      }
+    } else {
+      if (ticketParam) {
+        if (!webTickets.consume(ticketParam, origin ? normalizeOrigin(origin) : undefined)) {
+          return context.json({ error: "Invalid or expired ticket" }, 401);
+        }
+      } else if (authToken) {
+        const bearerToken = extractBearerToken(context.req.header("authorization"));
+        const valid =
+          (bearerToken !== undefined && bearerToken === authToken) ||
+          url.searchParams.get("token") === authToken;
+        if (!valid) {
+          return context.json({ error: "Unauthorized" }, 401);
+        }
+      }
+    }
+    await next();
+  });
+
   app.get(
     "/ws",
     upgradeWebSocket(() => ({
@@ -154,7 +329,13 @@ export async function createCoreHttpServer(
       },
     })),
   );
+
+  // 6. /ws/host
   app.use("/ws/host", async (context, next) => {
+    const origin = context.req.header("origin");
+    if (origin) {
+      return context.json({ error: "Browser origins are not permitted to access /ws/host" }, 403);
+    }
     const capability = context.req.header(ZCODE_RPC_HOST_CAPABILITY_HEADER);
     if (!capabilities.consume(capability)) {
       return context.json({ error: "Invalid or expired host capability" }, 401);
@@ -169,7 +350,6 @@ export async function createCoreHttpServer(
       },
     })),
   );
-  app.post("/api/rpc-host-capability", (context) => context.json(capabilities.issue()));
   let resolveListening: (value: { port: number }) => void = () => undefined;
   const listening = new Promise<{ port: number }>((resolve) => {
     resolveListening = resolve;

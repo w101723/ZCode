@@ -450,6 +450,7 @@ async function selectRemoteWorkspaceProjectFromDialog({
   loadingMessage,
   getRemoteWorkspaceSession,
   connectionTarget,
+  persistServerCredentials,
   getWorkspaceTabs,
   resolveRemoteWorkspaceCanonicalPath,
   activateTabByPath,
@@ -471,6 +472,7 @@ async function selectRemoteWorkspaceProjectFromDialog({
   loadingMessage: string;
   getRemoteWorkspaceSession: (sessionId: string) => RemoteWorkspaceSession | null;
   connectionTarget?: Parameters<IPlatformService["connectRemote"]>[0];
+  persistServerCredentials?: boolean;
   getWorkspaceTabs: () => WindowTabState[];
   resolveRemoteWorkspaceCanonicalPath: (
     sessionId: string,
@@ -514,7 +516,10 @@ async function selectRemoteWorkspaceProjectFromDialog({
   if (!remoteSession) {
     throw new Error(loadingMessage);
   }
-  const remoteTarget = connectionTarget ?? remoteSession.target;
+  const remoteTarget =
+    connectionTarget?.kind === "server" && remoteSession.target?.kind === "server"
+      ? { ...connectionTarget, serverId: remoteSession.target.serverId }
+      : (connectionTarget ?? remoteSession.target);
   if (!remoteTarget) {
     // 手机 web relay 复用 remote session store 只做服务路由，没有本地可重连 target。
     // 远程历史的选目录/持久化流程必须有 target，缺失时直接阻断，避免把无 target 的桥接 session 写进历史。
@@ -569,6 +574,7 @@ async function selectRemoteWorkspaceProjectFromDialog({
       localWorkspacePath,
       workspaceIdentity,
       target: remoteTarget,
+      persistServerCredentials,
       lastConnectionStatus: "connected",
       touchOpenedAt: true,
     }),
@@ -606,6 +612,7 @@ export function useRemoteWorkspaceHistory({
   platform,
   supportsSettings,
   allowRemoteWorkspace = true,
+  persistServerCredentials = true,
   ensureConversationWorkspaceOnRestore = false,
   deferInactiveWorkspaceRestore = false,
   unavailableWorkspacePath,
@@ -619,6 +626,7 @@ export function useRemoteWorkspaceHistory({
   platform: IPlatformService;
   supportsSettings: boolean;
   allowRemoteWorkspace?: boolean;
+  persistServerCredentials?: boolean;
   ensureConversationWorkspaceOnRestore?: boolean;
   /** 仅 Desktop 主窗口：输入可用后再把 inactive workspace 加入 sidebar/task 数据源。 */
   deferInactiveWorkspaceRestore?: boolean;
@@ -851,6 +859,7 @@ export function useRemoteWorkspaceHistory({
           activateTabByPath,
           setReconnectingRemoteWorkspaceKeys,
           loadCredential: services.credentialService.load,
+          persistServerCredentials,
           connectRemoteWorkspaceTarget,
           resolveRemoteWorkspaceCanonicalPath,
           disposeRemoteWorkspaceSession: handleCancelRemoteProject,
@@ -892,6 +901,7 @@ export function useRemoteWorkspaceHistory({
       connectRemoteWorkspaceTarget,
       handleCancelRemoteProject,
       onWorkspaceActivated,
+      persistServerCredentials,
       resolveRemoteWorkspaceCanonicalPath,
       resetLogsForWorkspaceKey,
       services.credentialService,
@@ -985,6 +995,7 @@ export function useRemoteWorkspaceHistory({
           loadingMessage: intl.formatMessage({ id: "common.loading" }),
           getRemoteWorkspaceSession,
           connectionTarget: pendingConnectionTargetsBySessionIdRef.current.get(sessionId),
+          persistServerCredentials,
           getWorkspaceTabs: () => tabStoreApi.getState().tabs,
           resolveRemoteWorkspaceCanonicalPath,
           activateTabByPath,
@@ -1012,6 +1023,7 @@ export function useRemoteWorkspaceHistory({
       handleCancelRemoteProject,
       intl,
       onWorkspaceActivated,
+      persistServerCredentials,
       resolveRemoteWorkspaceCanonicalPath,
       canUseRemoteWorkspace,
     ],
@@ -1186,6 +1198,7 @@ export function useRemoteWorkspaceHistory({
               password: null,
               privateKeyPassphrase: null,
             }),
+            persistServerCredentials,
             lastConnectionStatus: "failed",
             lastConnectionError: reason,
             touchOpenedAt: false,
@@ -1193,7 +1206,7 @@ export function useRemoteWorkspaceHistory({
         );
       }
     },
-    [commitRemoteWorkspaceSessionMutation, tabStoreApi],
+    [commitRemoteWorkspaceSessionMutation, persistServerCredentials, tabStoreApi],
   );
 
   useEffect(() => {

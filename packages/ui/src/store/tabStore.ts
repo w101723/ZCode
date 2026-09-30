@@ -44,6 +44,7 @@ export interface WorkspaceTabState extends TabState {
 }
 
 export interface WorkspaceTabOptions {
+  previousWorkspaceKey?: string;
   availability?: WorkspaceAvailability;
   remoteSessionId?: string;
   remoteTarget?: RemoteTarget;
@@ -164,6 +165,16 @@ function createWorkspaceTab(
   };
 }
 
+function matchesWorkspaceUpdate(
+  tab: WorkspaceTabState,
+  workspacePath: string,
+  options?: WorkspaceTabOptions,
+): boolean {
+  return options?.previousWorkspaceKey
+    ? (tab.workspaceIdentity?.trim() || tab.workspacePath) === options.previousWorkspaceKey
+    : isSameWorkspaceTab(tab, workspacePath, options);
+}
+
 function mergeWorkspaceTabOptions(
   tab: WorkspaceTabState,
   options?: WorkspaceTabOptions,
@@ -260,7 +271,7 @@ export function createTabStore(storage: StorageLike | null | undefined = undefin
       // 这里优先按 workspaceIdentity（authority + canonicalPath）匹配，路径只作为最后兜底。
       const existing = get().tabs.find(
         (tab): tab is WorkspaceTabState =>
-          isWorkspaceTab(tab) && isSameWorkspaceTab(tab, workspacePath, options),
+          isWorkspaceTab(tab) && matchesWorkspaceUpdate(tab, workspacePath, options),
       );
       if (existing) {
         persistWorkspaceExpandedPreference(existing.workspacePath, true, storage);
@@ -272,10 +283,14 @@ export function createTabStore(storage: StorageLike | null | undefined = undefin
           tabs: state.tabs.map((tab) =>
             tab.id !== existing.id || !isWorkspaceTab(tab)
               ? tab
-              : mergeWorkspaceTabOptions(tab, options),
+              : {
+                  ...mergeWorkspaceTabOptions(tab, options),
+                  workspacePath,
+                  label: labelFromPath(workspacePath),
+                },
           ),
           activeTabId: existing.id,
-          activeWorkspacePath: existing.workspacePath,
+          activeWorkspacePath: workspacePath,
           // Settings 页的插件管理要按“最近激活 workspace”的 identity 继续命中同一远端。
           // 之前这里只保存路径，切到 settings tab 后 identity 会丢失，导致同路径远端隔离失效。
           activeWorkspaceIdentity: options?.workspaceIdentity ?? existing.workspaceIdentity ?? null,
@@ -308,16 +323,28 @@ export function createTabStore(storage: StorageLike | null | undefined = undefin
     ensureWorkspaceTab: (workspacePath: string, options) => {
       const existing = get().tabs.find(
         (tab): tab is WorkspaceTabState =>
-          isWorkspaceTab(tab) && isSameWorkspaceTab(tab, workspacePath, options),
+          isWorkspaceTab(tab) && matchesWorkspaceUpdate(tab, workspacePath, options),
       );
       if (existing) {
         persistWorkspaceExpandedPreference(existing.workspacePath, true, storage);
+        // 连接校验可能升级远端身份；由 Tab Store 原子替换，保留原 tab id 与当前焦点。
         set((state) => ({
           tabs: state.tabs.map((tab) =>
             tab.id !== existing.id || !isWorkspaceTab(tab)
               ? tab
-              : mergeWorkspaceTabOptions(tab, options),
+              : {
+                  ...mergeWorkspaceTabOptions(tab, options),
+                  workspacePath,
+                  label: labelFromPath(workspacePath),
+                },
           ),
+          ...(state.activeTabId === existing.id
+            ? {
+                activeWorkspacePath: workspacePath,
+                activeWorkspaceIdentity:
+                  options?.workspaceIdentity ?? existing.workspaceIdentity ?? null,
+              }
+            : {}),
           expandedWorkspacePaths: ensureWorkspaceExpanded(
             state.expandedWorkspacePaths,
             existing.workspacePath,

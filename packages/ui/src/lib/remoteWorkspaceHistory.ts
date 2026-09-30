@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- 远端 workspace 历史集中维护持久化、凭据和 MCP 路径映射元数据，拆分会扩大恢复链路回归面。 */
+import { buildRemoteWorkspaceIdentity as buildSharedRemoteWorkspaceIdentity } from "@zcode/shared";
 import type {
   AppSettings,
   PersistedWorkspaceSessionEntry,
@@ -41,6 +42,9 @@ function collectRemoteWorkspaceCredentialKeys(snapshot: RemoteTargetSnapshot): s
     );
   }
 
+  if (snapshot.kind === "server") {
+    return snapshot.tokenCredentialKey ? [snapshot.tokenCredentialKey] : [];
+  }
   return [];
 }
 
@@ -79,6 +83,8 @@ export function formatRemoteWorkspaceTargetSubtitle(
     }
     case "docker":
       return `Docker · ${target.container}`;
+    case "server":
+      return `Server · ${target.name || target.serverId || target.serverUrl}`;
   }
 }
 
@@ -92,6 +98,8 @@ export function formatRemoteWorkspaceHeaderHostLabel(
       return formatWslRemoteTargetAuthority(target);
     case "docker":
       return `docker:${target.container}`;
+    case "server":
+      return target.name || target.serverId || target.serverUrl;
   }
 }
 
@@ -131,6 +139,10 @@ function getRemoteWorkspaceAuthorityKey(target: RemoteTarget | RemoteTargetSnaps
     }
     case "docker":
       return ["docker", target.container].join(":");
+    case "server": {
+      const serverId = target.serverId?.trim() || new URL(target.serverUrl).host;
+      return ["server", encodeURIComponent(serverId).replace(/%3A/giu, "_")].join(":");
+    }
   }
 }
 
@@ -138,6 +150,9 @@ export function buildRemoteWorkspaceIdentity(
   workspacePath: string,
   target: RemoteTarget | RemoteTargetSnapshot,
 ): string {
+  if (target.kind === "server") {
+    return buildSharedRemoteWorkspaceIdentity(workspacePath, target);
+  }
   const authority = getRemoteWorkspaceAuthorityKey(target);
   const normalizedPath = normalizeWorkspacePathForIdentity(workspacePath);
   return `remote:${authority}:${normalizedPath}`;
@@ -177,6 +192,7 @@ function createRemoteTargetSnapshot(
   workspaceKey: string,
   target: RemoteTarget,
   previousSnapshot?: RemoteTargetSnapshot,
+  persistServerCredentials = true,
 ): RemoteTargetSnapshot {
   switch (target.kind) {
     case "ssh":
@@ -214,6 +230,23 @@ function createRemoteTargetSnapshot(
         kind: "docker",
         container: target.container,
       };
+    case "server":
+      return {
+        kind: "server",
+        serverUrl: target.serverUrl,
+        ...(target.name ? { name: target.name } : {}),
+        ...(target.serverId ? { serverId: target.serverId } : {}),
+        ...(persistServerCredentials && target.token?.trim()
+          ? {
+              tokenCredentialKey:
+                previousSnapshot?.kind === "server" && previousSnapshot.tokenCredentialKey
+                  ? previousSnapshot.tokenCredentialKey
+                  : `remote-workspace:${workspaceKey}:server-token`,
+            }
+          : persistServerCredentials && target.tokenCredentialKey
+            ? { tokenCredentialKey: target.tokenCredentialKey }
+            : {}),
+      };
   }
 }
 
@@ -222,6 +255,7 @@ export function createRemoteTargetFromSnapshot(
   credentials: {
     password: string | null;
     privateKeyPassphrase: string | null;
+    serverToken?: string | null;
   },
 ): RemoteTarget {
   switch (snapshot.kind) {
@@ -249,6 +283,15 @@ export function createRemoteTargetFromSnapshot(
       return {
         kind: "docker",
         container: snapshot.container,
+      };
+    case "server":
+      return {
+        kind: "server",
+        serverUrl: snapshot.serverUrl,
+        ...(snapshot.name ? { name: snapshot.name } : {}),
+        ...(snapshot.serverId ? { serverId: snapshot.serverId } : {}),
+        ...(snapshot.tokenCredentialKey ? { tokenCredentialKey: snapshot.tokenCredentialKey } : {}),
+        ...(credentials.serverToken ? { token: credentials.serverToken } : {}),
       };
   }
 }
@@ -300,16 +343,28 @@ export function buildRemoteWorkspaceSessionMutation(params: {
   localWorkspacePath?: string;
   workspaceIdentity?: string;
   target: RemoteTarget;
+  persistServerCredentials?: boolean;
+  previousWorkspaceKey?: string;
   lastConnectionStatus: RemoteWorkspaceSessionEntry["lastConnectionStatus"];
   lastConnectionError?: string;
   touchOpenedAt: boolean;
 }): RemoteWorkspaceSessionMutation {
   const currentEntry =
+    params.remoteSessions.find(
+      (entry) =>
+        Boolean(params.previousWorkspaceKey) &&
+        buildWorkspaceSessionKey(entry) === params.previousWorkspaceKey,
+    ) ??
+    params.remoteSessions.find(
+      (entry) =>
+        entry.workspaceIdentity === params.workspaceIdentity && Boolean(params.workspaceIdentity),
+    ) ??
     findMatchingRemoteWorkspaceSessionEntry(
       params.remoteSessions,
       params.workspacePath,
       params.target,
-    ) ?? null;
+    ) ??
+    null;
   const resolvedWorkspaceIdentity =
     params.workspaceIdentity ??
     currentEntry?.workspaceIdentity ??
@@ -317,8 +372,15 @@ export function buildRemoteWorkspaceSessionMutation(params: {
   const workspaceKey = resolvedWorkspaceIdentity?.trim() || params.workspacePath;
   const nextSnapshot =
     params.lastConnectionStatus === "failed" && currentEntry
-      ? currentEntry.target
-      : createRemoteTargetSnapshot(workspaceKey, params.target, currentEntry?.target);
+      ? params.target.kind === "server" && params.persistServerCredentials === false
+        ? createRemoteTargetSnapshot(workspaceKey, params.target, currentEntry.target, false)
+        : currentEntry.target
+      : createRemoteTargetSnapshot(
+          workspaceKey,
+          params.target,
+          currentEntry?.target,
+          params.persistServerCredentials,
+        );
   const localWorkspacePath = normalizeOptionalPath(
     params.localWorkspacePath ?? currentEntry?.localWorkspacePath,
   );
@@ -337,7 +399,15 @@ export function buildRemoteWorkspaceSessionMutation(params: {
         ? (params.lastConnectionError ?? currentEntry?.lastConnectionError)
         : undefined,
   };
-  const nextRemoteSessions = upsertRemoteWorkspaceSessionEntries(params.remoteSessions, nextEntry);
+  // 身份校验升级会改变 workspace key；精确替换原条目，不能保留 URL 身份的重复历史。
+  const nextRemoteSessions = upsertRemoteWorkspaceSessionEntries(
+    params.remoteSessions.filter(
+      (entry) =>
+        !params.previousWorkspaceKey ||
+        buildWorkspaceSessionKey(entry) !== params.previousWorkspaceKey,
+    ),
+    nextEntry,
+  );
   const nextRemoteWorkspaceKeys = new Set(
     nextRemoteSessions.map((entry) => buildWorkspaceSessionKey(entry)),
   );
@@ -359,7 +429,7 @@ export function buildRemoteWorkspaceSessionMutation(params: {
     }
 
     for (const credentialKey of collectRemoteWorkspaceCredentialKeys(removedEntry.target)) {
-      credentialKeysToDelete.add(credentialKey);
+      if (!nextCredentialKeys.has(credentialKey)) credentialKeysToDelete.add(credentialKey);
     }
   }
 
@@ -387,6 +457,15 @@ export function buildRemoteWorkspaceSessionMutation(params: {
       key: nextSnapshot.privateKeyPassphraseCredentialKey,
       value: params.target.privateKeyPassphrase,
     });
+  }
+  if (
+    params.target.kind === "server" &&
+    params.persistServerCredentials !== false &&
+    nextSnapshot.kind === "server" &&
+    params.target.token &&
+    nextSnapshot.tokenCredentialKey
+  ) {
+    credentialsToSave.push({ key: nextSnapshot.tokenCredentialKey, value: params.target.token });
   }
 
   return {

@@ -31,5 +31,8 @@ export async function createRemoteBackend(target: RemoteTarget): Promise<IRemote
       const { DockerBackend } = await import("./docker-backend.js");
       return new DockerBackend(target);
     }
+    case "server": {
+      throw new Error("Server 目标为直连模式，不使用 CLI 部署 backend");
+    }
   }
 }

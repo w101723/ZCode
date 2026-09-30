@@ -151,6 +151,7 @@ import { createRemoteConnectionProgressContext } from "@zcode/server/remote/remo
 import { startHostSelfResourceTelemetry } from "./hostSelfResourceTelemetry.js";
 type RemoteBackendHostConnection = RemoteConnection & {
   backend: IRemoteBackend;
+  serverInfo?: import("@zcode/shared").ServerRemoteInfo;
 };
 type HostRemoteConnection = RemoteBackendHostConnection;
 interface HostRemoteConnectionCapabilities {
@@ -1534,6 +1535,8 @@ function formatRemoteTargetForLog(target: RemoteTarget): string {
     }
     case "docker":
       return `docker:${target.container}`;
+    case "server":
+      return `server:${target.serverId?.trim() || target.serverUrl.trim()}`;
   }
 }
 
@@ -1634,7 +1637,7 @@ async function createWindowRemoteConnectionHandle(params: {
     await resolveDesktopRemoteRuntimeNetwork(params.target),
     (exitCode) => notifyClose({ exitCode, signal: null }),
     params.target.kind === "ssh" ? "caller-serialized" : "remote",
-    params.target.kind === "ssh" ? params.signal : undefined,
+    params.target.kind === "ssh" || params.target.kind === "server" ? params.signal : undefined,
   );
 
   if (params.signal.aborted) {
@@ -1711,6 +1714,7 @@ async function createWindowRemoteConnectionHandle(params: {
         });
   return {
     services,
+    ...(connection.serverInfo ? { serverInfo: connection.serverInfo } : {}),
     capabilities:
       "backend" in connection
         ? {
@@ -2537,7 +2541,10 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
   if (msg.type === HostMessageTypes.ConnectRemoteWorkspace) {
     const workspacePath = msg.workspacePath ?? "/";
     const workspaceIdentity =
-      msg.workspaceIdentity ?? buildRemoteWorkspaceIdentity(workspacePath, msg.target);
+      msg.workspaceIdentity ??
+      (msg.target.kind === "server" && !msg.target.serverId
+        ? undefined
+        : buildRemoteWorkspaceIdentity(workspacePath, msg.target));
     logger.info(
       `connecting window-scoped remote source, requestId=${msg.requestId}, target=${formatRemoteTargetForLog(msg.target)}`,
     );
@@ -2912,8 +2919,20 @@ async function setupRemoteConnection(
   signal?: AbortSignal,
 ): Promise<HostRemoteConnection> {
   // 延迟加载 remote backend，避免 local 模式下因 ssh2 依赖链进入 asar 后崩溃
-  const { createRemoteBackend, connectRemote, pickRemoteRuntimeEnv } =
+  const { createRemoteBackend, connectRemote, connectServerRemote, pickRemoteRuntimeEnv } =
     await import("@zcode/server/remote");
+
+  if (target.kind === "server") {
+    const connection = await connectServerRemote({
+      target,
+      signal,
+      onDidRemoteClose: ({ code }) => {
+        onDidRemoteClose(code);
+      },
+    });
+    return connection;
+  }
+
   const backend = await createRemoteBackend(target);
   const connection = await connectRemote(backend, {
     ...remoteAssets,

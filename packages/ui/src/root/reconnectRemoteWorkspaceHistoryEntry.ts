@@ -13,6 +13,7 @@ import { logger } from "@/logger.js";
 import {
   bindRemoteWorkspaceIdentity,
   bindRemoteWorkspacePath,
+  getRemoteWorkspaceSession,
 } from "@/store/remoteWorkspaceSessionStore.js";
 import { refreshRemotePinnedTasksForSession } from "@/store/remotePinnedTaskStore.js";
 import { refreshRemoteTimelineTasksForSession } from "@/store/remoteTimelineTaskStore.js";
@@ -29,6 +30,7 @@ type ManualReconnectRemoteWorkspaceParams = {
   activateTabByPath: (workspacePath: string, options?: { workspaceIdentity?: string }) => boolean;
   setReconnectingRemoteWorkspaceKeys: Dispatch<SetStateAction<string[]>>;
   loadCredential: IServiceAccessor["credentialService"]["load"];
+  persistServerCredentials?: boolean;
   connectRemoteWorkspaceTarget: (
     target: Parameters<IPlatformService["connectRemote"]>[0],
     requestId?: string,
@@ -49,6 +51,7 @@ type ManualReconnectRemoteWorkspaceParams = {
       remoteTarget?: Parameters<IPlatformService["connectRemote"]>[0];
       workspaceIdentity?: string;
       localWorkspacePath?: string;
+      previousWorkspaceKey?: string;
     },
   ) => void;
   commitRemoteWorkspaceSessionMutation: (
@@ -74,6 +77,7 @@ export interface ReconnectRemoteWorkspaceOptions {
   showErrorToast?: boolean;
   requestId?: string;
   throwOnFailure?: boolean;
+  serverTokenOverride?: string;
   /** 共享 Host ready 后，sibling 复用 initiator 凭据附着，禁止再次读取各自历史凭据。 */
   sshCredentialsOverride?: SshReconnectCredentials;
   /** logical connect 已返回，表示共享 SSH Host ready；workspace 初始化仍可能继续或失败。 */
@@ -85,6 +89,7 @@ export async function reconnectRemoteWorkspaceHistoryEntry({
   activateTabByPath,
   setReconnectingRemoteWorkspaceKeys,
   loadCredential,
+  persistServerCredentials = true,
   connectRemoteWorkspaceTarget,
   resolveRemoteWorkspaceCanonicalPath,
   disposeRemoteWorkspaceSession,
@@ -128,16 +133,39 @@ export async function reconnectRemoteWorkspaceHistoryEntry({
           ? await loadCredential(sessionEntry.target.privateKeyPassphraseCredentialKey)
           : null,
     };
-    reconnectTarget = createRemoteTargetFromSnapshot(sessionEntry.target, sshCredentials);
+    const serverToken =
+      options?.serverTokenOverride ??
+      (persistServerCredentials &&
+      sessionEntry.target.kind === "server" &&
+      sessionEntry.target.tokenCredentialKey
+        ? await loadCredential(sessionEntry.target.tokenCredentialKey)
+        : null);
+    reconnectTarget = createRemoteTargetFromSnapshot(sessionEntry.target, {
+      ...sshCredentials,
+      serverToken,
+    });
+    // 旧 Server 历史的 URL 身份尚未经过握手校验，透传会触发 Host 的身份守卫。
+    const initialConnectWorkspaceIdentity =
+      sessionEntry.target.kind === "server" && !sessionEntry.target.serverId
+        ? undefined
+        : fallbackWorkspaceIdentity;
     const sessionId = await connectRemoteWorkspaceTarget(reconnectTarget, options?.requestId, {
       workspacePath: sessionEntry.workspacePath,
-      workspaceIdentity: fallbackWorkspaceIdentity,
+      workspaceIdentity: initialConnectWorkspaceIdentity,
       connectTrigger: "reconnect",
     });
     if (reconnectTarget.kind === "ssh") {
       // Host ready 与 provider/task 等 workspace 初始化必须分阶段通知。
       // sibling 从此刻即可复用 initiator credential 创建 attachment，无需等待或重复读取凭据。
       options?.onSshHostReady?.(sshCredentials);
+    }
+    if (reconnectTarget.kind === "server") {
+      const connectedTarget = getRemoteWorkspaceSession(sessionId)?.target;
+      if (connectedTarget?.kind !== "server" || !connectedTarget.serverId) {
+        await disposeRemoteWorkspaceSession(sessionId);
+        throw new Error("Server connection did not provide a validated identity");
+      }
+      reconnectTarget = { ...reconnectTarget, serverId: connectedTarget.serverId };
     }
     resolvedWorkspacePath = await resolveRemoteWorkspaceCanonicalPath(
       sessionId,
@@ -175,8 +203,8 @@ export async function reconnectRemoteWorkspaceHistoryEntry({
     if (
       shouldKeepReconnectedWorkspace &&
       !shouldKeepReconnectedWorkspace({
-        workspacePath: resolvedWorkspacePath,
-        workspaceIdentity: resolvedWorkspaceIdentity,
+        workspacePath: sessionEntry.workspacePath,
+        workspaceIdentity: fallbackWorkspaceIdentity,
       })
     ) {
       logger.warn("[Root] 远程 workspace 在重连过程中已被移除，跳过恢复并回收 session", {
@@ -192,6 +220,7 @@ export async function reconnectRemoteWorkspaceHistoryEntry({
       remoteTarget: stripRemoteTargetSecrets(reconnectTarget),
       workspaceIdentity: resolvedWorkspaceIdentity,
       localWorkspacePath: sessionEntry.localWorkspacePath,
+      previousWorkspaceKey: reconnectWorkspaceKey,
     });
     if (activateWorkspaceAfterReconnect) {
       // 侧栏重连过去会先激活只有 identity、尚无 remoteSessionId 的断连 tab，
@@ -214,6 +243,8 @@ export async function reconnectRemoteWorkspaceHistoryEntry({
         localWorkspacePath: sessionEntry.localWorkspacePath,
         workspaceIdentity: resolvedWorkspaceIdentity,
         target: reconnectTarget,
+        persistServerCredentials,
+        previousWorkspaceKey: reconnectWorkspaceKey,
         lastConnectionStatus: "connected",
         touchOpenedAt: true,
       }),
@@ -239,9 +270,13 @@ export async function reconnectRemoteWorkspaceHistoryEntry({
     await commitRemoteWorkspaceSessionMutation(
       buildRemoteWorkspaceSessionMutation({
         remoteSessions: getRemoteSessions(),
-        workspacePath: resolvedWorkspacePath,
-        workspaceIdentity: resolvedWorkspaceIdentity,
-        target: reconnectTarget,
+        workspacePath: sessionEntry.workspacePath,
+        workspaceIdentity: fallbackWorkspaceIdentity,
+        target: createRemoteTargetFromSnapshot(sessionEntry.target, {
+          password: null,
+          privateKeyPassphrase: null,
+        }),
+        persistServerCredentials,
         lastConnectionStatus: "failed",
         lastConnectionError: message,
         touchOpenedAt: false,

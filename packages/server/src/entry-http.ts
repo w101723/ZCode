@@ -13,7 +13,17 @@ async function main(): Promise<void> {
   const port = Number(process.env["PORT"]) || 3030;
   const host = process.env["ZCODE_SERVER_HOST"]?.trim() || process.env["HOST"]?.trim() || undefined;
   const staticRoot = process.env["ZCODE_WEB_STATIC_ROOT"]?.trim() || undefined;
-  const authToken = process.env["ZCODE_SERVER_AUTH_TOKEN"]?.trim() || undefined;
+  const authToken =
+    process.env["ZCODE_SERVER_AUTH_TOKEN"]?.trim() ||
+    process.env["ZCODE_SERVER_TOKEN"]?.trim() ||
+    undefined;
+  const allowedWebOriginsEnv = process.env["ZCODE_SERVER_ALLOWED_WEB_ORIGINS"]?.trim();
+  const allowedWebOrigins = allowedWebOriginsEnv
+    ? allowedWebOriginsEnv
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : undefined;
   const services = createLocalServices({
     zcodeBuiltinProviderConfigFilePath,
     providerProvisioningTargetEnabled: Boolean(authToken),
@@ -23,6 +33,7 @@ async function main(): Promise<void> {
     ...(host ? { host } : {}),
     ...(staticRoot ? { staticRoot, spaFallback: true } : {}),
     ...(authToken ? { authToken, authRequired: true } : {}),
+    ...(allowedWebOrigins ? { allowedWebOrigins } : {}),
   });
 }
 

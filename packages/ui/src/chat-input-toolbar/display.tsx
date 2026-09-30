@@ -40,7 +40,11 @@ import {
   ShieldCheckIcon,
   type LucideIcon,
 } from "lucide-react";
-import { ZCODE_MODE_OPTION_DESCRIPTION_IDS, ZCODE_MODE_OPTION_LABEL_IDS } from "./display-help.js";
+import {
+  ZCODE_MODE_OPTION_DESCRIPTION_IDS,
+  ZCODE_MODE_OPTION_LABEL_IDS,
+  type ModeDisplayFamily,
+} from "./display-help.js";
 import { RollingToolbarLabel } from "@/chat-input-toolbar/RollingToolbarLabel.js";
 
 export {
@@ -135,7 +139,7 @@ export function ChatApiRetryStatus({
 
 export function getModeOptionDisplayLabel(
   intl: ReturnType<typeof useZCodeIntl>["intl"],
-  provider: ZCodeProvider | undefined,
+  provider: ModeDisplayFamily | undefined,
   entry: Pick<ZCodeConfigSelectValue, "name" | "value">,
 ): string {
   const labelMessageId = getModeOptionLabelMessageId(provider, entry);
@@ -147,7 +151,7 @@ export function getModeOptionDisplayLabel(
 }
 
 function getModeOptionLabelMessageId(
-  provider: ZCodeProvider | undefined,
+  provider: ModeDisplayFamily | undefined,
   entry: Pick<ZCodeConfigSelectValue, "value">,
 ): string | null {
   if (!provider) {
@@ -158,7 +162,7 @@ function getModeOptionLabelMessageId(
 }
 
 export function getModeOptionDescriptionMessageId(
-  provider: ZCodeProvider | undefined,
+  provider: ModeDisplayFamily | undefined,
   entry: Pick<ZCodeConfigSelectValue, "value">,
 ): string | null {
   if (!provider) {
@@ -170,7 +174,7 @@ export function getModeOptionDescriptionMessageId(
 
 export function getConfigOptionEntryLabel(
   intl: ReturnType<typeof useZCodeIntl>["intl"],
-  provider: ZCodeProvider | undefined,
+  provider: ModeDisplayFamily | undefined,
   option: ZCodeConfigOption,
   entry: ZCodeConfigSelectValue,
 ): string {
@@ -183,7 +187,7 @@ export function getConfigOptionEntryLabel(
 
 function getConfigOptionEntryDescription(
   intl: ReturnType<typeof useZCodeIntl>["intl"],
-  provider: ZCodeProvider | undefined,
+  provider: ModeDisplayFamily | undefined,
   option: ZCodeConfigOption,
   entry: ZCodeConfigSelectValue,
 ): string | undefined {
@@ -200,7 +204,10 @@ function getConfigOptionEntryDescription(
 }
 
 function isHighPermissionModeValue(value: unknown): boolean {
-  return value === "yolo";
+  return (
+    typeof value === "string" &&
+    ["yolo", "bypassPermissions", "full-access", "agent-full-access"].includes(value)
+  );
 }
 
 export function resolveModeOptionIcon(value: unknown): LucideIcon {
@@ -209,10 +216,13 @@ export function resolveModeOptionIcon(value: unknown): LucideIcon {
   }
 
   // build 对应常规确认模式，使用确认图标。
-  if (typeof value === "string" && value.toLocaleLowerCase() === "build") return HandIcon;
+  if (typeof value === "string" && /^(default|build)$/i.test(value)) return HandIcon;
   if (typeof value === "string" && value.toLocaleLowerCase() === "plan") return NotepadText;
 
-  if (typeof value === "string" && /^(auto|agent|autoEdit|edit)$/i.test(value)) {
+  if (
+    typeof value === "string" &&
+    /^(auto|acceptEdits|agent|autoEdit|dontAsk|edit)$/i.test(value)
+  ) {
     return ShieldCheckIcon;
   }
 

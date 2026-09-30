@@ -156,10 +156,19 @@ export interface DockerRemoteTargetSnapshot {
   container: string;
 }
 
+export interface ServerRemoteTargetSnapshot {
+  kind: "server";
+  serverUrl: string;
+  name?: string;
+  serverId?: string;
+  tokenCredentialKey?: string;
+}
+
 export type RemoteTargetSnapshot =
   | SSHRemoteTargetSnapshot
   | WSLRemoteTargetSnapshot
-  | DockerRemoteTargetSnapshot;
+  | DockerRemoteTargetSnapshot
+  | ServerRemoteTargetSnapshot;
 
 export interface RemoteWorkspaceSessionSnapshot {
   /** 远程 workspace 的真实绝对路径 */
